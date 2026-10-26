@@ -11,14 +11,14 @@ if (publicBase) {
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash || !['', '/'].includes(parsed.pathname)) throw new Error('PUBLIC_URL must be an HTTP(S) origin without credentials or a path.');
   publicBase = parsed.origin;
 }
-const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/scanner.js': ['scanner.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/scanner.js': ['scanner.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/assets/crimson-logo.png': ['assets/crimson-logo.png', 'image/png'] };
 const server = http.createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   if (await api(req, res, pathname)) return;
   const downloads = {
-    '/scanner.exe': ['dist/sentinel-scanner-windows-amd64.exe', 'application/octet-stream', 'sentinel-scanner-windows-amd64.exe'],
+    '/scanner.exe': ['dist/crimson-pc-check-windows-amd64.exe', 'application/octet-stream', 'crimson-pc-check-windows-amd64.exe'],
     '/scanner-checksums.txt': ['dist/checksums.txt', 'text/plain', 'checksums.txt'],
-    '/download-project.zip': ['dist/sentinel-project.zip', 'application/zip', 'sentinel-project.zip']
+    '/download-project.zip': ['dist/crimson-pc-check.zip', 'application/zip', 'crimson-pc-check.zip']
   };
   if (downloads[pathname]) {
     const [path, contentType, filename] = downloads[pathname];
@@ -46,4 +46,4 @@ const server = http.createServer(async (req, res) => {
     res.end(body);
   } catch { res.writeHead(500); res.end('Unable to serve application'); }
 });
-server.listen(Number(process.env.PORT || 3000), process.env.HOST || '127.0.0.1', () => console.log('Sentinel running on port ' + (process.env.PORT || 3000)));
+server.listen(Number(process.env.PORT || 3000), process.env.HOST || '127.0.0.1', () => console.log('Crimson PC Check running on port ' + (process.env.PORT || 3000)));

@@ -1,29 +1,36 @@
-SENTINEL - FIRST LOCAL TEST (WINDOWS)
+CRIMSON PC CHECK V2 - WINDOWS
 
-1. Install Node.js 22 or later from https://nodejs.org.
-2. Extract the whole project ZIP. Do not run files from inside the ZIP.
-3. Double-click start-sentinel.cmd and keep the terminal open.
-4. Open http://localhost:3000 in your browser.
-5. Create a staff password (at least 12 characters).
-6. Import a trusted signature JSON list before creating a session.
-   Without signatures, results are UNVERIFIED, not clean.
-7. Create a session and note its six-digit code.
-8. Download the Windows scanner using the website button.
-   It is unsigned. Review the included client source and follow your
-   Windows security policy. Do not disable antivirus or security warnings.
-9. On the SAME Windows PC for this local test, run the scanner.
-   Enter http://localhost:3000, your code and a folder you own.
-   Optional running executable hashing requires separate opt-in.
-10. Review the local JSON report before choosing SEND.
-11. Refresh sessions in the website, view the report and export it.
+1. Install Node.js 22+ from https://nodejs.org if it is not installed.
+2. Extract the ZIP. Double-click start-crimson.cmd. Keep this window open.
+3. Open http://localhost:3000. Set up your staff password or sign in.
+4. Import trusted signature JSON, or use Add a signature with its evidence
+   reference. Click Save library. It persists across server restarts.
+   No library means inventory only, never a "clean PC" verdict.
+5. Create a session. Click Guided scanner on that session row.
+6. Open the downloaded EXE. A local browser wizard opens with server and code
+   already filled in. No PROCESSES / YES / SEND terminal commands required.
+7. Choose a folder and/or opt in to running executable file hashing.
+   Check the permission box, then click Commencer la verification.
+8. Review the report. Check the sharing permission box and click Envoyer.
+9. The staff site refreshes automatically. Open View report. Search, filter,
+   export JSON or re-analyze against your saved library. Original evidence
+   is retained; harmless test and allowed signatures are labeled separately.
 
-localhost means this PC only. For checks across different PCs, first deploy
-the server behind HTTPS and use its real HTTPS domain in the scanner.
-There is no public deployment included.
+FALLBACK: the generic EXE is in dist/crimson-pc-check-windows-amd64.exe.
+It opens the same wizard; enter your 6-digit session code there.
 
-This is an MVP, not a proven commercial anti-cheat. The Windows binary has
-been cross-compiled; Windows process inspection needs real Windows testing.
-No verified cheat database is included. An exact match is evidence for review,
-not proof that the player cheated. No match does not prove a clean PC.
+The native build is unsigned. Follow your Windows security policy. Do not
+ disable antivirus or bypass platform warnings. The base EXE has a checksum
+in dist/checksums.txt. Session EXEs include a private configuration footer
+and therefore have different hashes. The website checks the base checksum
+before appending the session code; this does not replace publisher signing.
 
-See README.md for hosting, security, build and testing details.
+For local testing, use the same PC for the staff site and scanner. localhost
+means this PC. Across different PCs, deploy the staff server behind HTTPS
+and use its real domain. No public hosting is included.
+
+No verified FiveM cheat feed is bundled. Staff-provided signatures require
+independent review. A match is not proof of cheating. This is not a full-PC
+or process-memory anti-cheat, and client reports are not attested.
+
+See UPDATE.txt to preserve your existing data when updating from Sentinel.

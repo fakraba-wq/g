@@ -2,3 +2,4 @@ node_modules/
 .sentinel/
 *.log
 dist/
+.test-artifacts/

@@ -1,66 +1,66 @@
-# Sentinel — FiveM File Check
+# Crimson PC Check — v2
 
-A responsive, private-by-default file-integrity dashboard. Uses real browser SHA-256 hashing, a user-imported signature library, and downloadable JSON evidence reports. No third-party dependencies or bundled cheat signatures.
+A red and charcoal FiveM file-integrity dashboard using the provided Crimson RP logo. Includes a guided Windows scanner, staff sessions, persistent signature library, original evidence plus re-analysis, search/filter and JSON export. Standard Node.js and Go libraries only; no external runtime packages.
 
-## Run
+## Start
 
-Node.js 22+ is required. From this directory:
+Node.js 22+ is required. On Windows, double-click `start-crimson.cmd`. Otherwise run `npm start` from this directory. Open `http://localhost:3000`. Keep the server window open. The legacy `start-sentinel.cmd` delegates to the new launcher.
 
-```sh
-npm start
-```
+Create a staff password locally (12–256 characters). Passwords are salted and scrypt-hashed. For remote hosting, configure `SENTINEL_ADMIN_PASSWORD` securely before startup; initial browser setup is allowed from loopback only. Staff sign-in tokens expire after six hours and are revoked by sign-out.
 
-Open `http://localhost:3000`. Use HTTPS when hosting remotely; Web Crypto hashing requires a secure context. `PORT` overrides port 3000. Run `npm test` for the scanner tests.
+See `QUICKSTART.txt` for the Windows walkthrough and `UPDATE.txt` for upgrading without losing your existing data. Local data remains in `.sentinel/` for backward compatibility; it is never bundled or committed.
 
-## Use
+## Guided Windows checks
 
-1. Import a JSON signature library from a source you trust (optional; without it files are marked **unverified**).
-2. Select files or a folder, confirm permission, and run a check.
-3. Review hashes, matched signature names, and sources. Export the JSON report if needed.
+1. Import signatures from a source you have independently reviewed, or add a name, SHA-256, classification and evidence reference. Click **Save library**. Revisions and source references persist on the server.
+2. Create a session. Without signatures the button explicitly creates an **inventory session**, not a cheat verdict. Codes are private, valid for 30 minutes and redeemable once.
+3. Click **Guided scanner** on the session row. The website verifies the base binary checksum, then appends a bounded JSON configuration footer with the server origin and that private code. This personalized EXE has a different SHA-256 from the base build. Do not share it with unintended players. This is not publisher signing.
+4. Launch the EXE. A local browser wizard opens. Choose a folder using the native picker and/or opt in to readable running executable file hashing. Check the permission box and start. Invalid input stays on-screen; no terminal commands are needed. The generic EXE in `dist/` opens the same wizard with the staff origin defaulted to localhost and the session code left blank.
+5. Review the local report. Sharing is a separate checkbox and action. Nothing is uploaded automatically. Only filenames, sizes, hashes, origins and optional process IDs are sent. Raw file contents, browser history, credentials, registry and process memory are not collected.
+6. Staff sessions refresh every ten seconds while the tab is visible. Open the report, search or filter it, and export JSON. After saving new signatures, **Re-analyze with saved library** compares the existing hashes again without rescanning the player. Original collection evidence is retained; the last five separate analyses are stored.
 
-Signature format:
+The local wizard binds a random loopback port, uses a random access token, checks Host/Origin and requires token-authenticated JSON for operations. It stops on **Fermer le scanner**, console closure or a one-hour lifetime. It does not install a service or start itself on login. Local reports are saved to temporary JSON files on the player's PC.
+
+The legacy terminal interface remains available with `-cli`; confirmation words are case-insensitive. Optional `-server` and `-code` flags prefill either interface. `-no-open` prints the private local wizard URL for diagnostics instead of opening a browser.
+
+## Signature format and meaning
 
 ```json
 [
   {
     "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-    "name": "Harmless demonstration: file containing hello, not a cheat",
-    "source": "Format example only; use your independently verified signatures"
+    "name": "Harmless hello test fixture — not a cheat",
+    "source": "Five UTF-8 bytes: hello; demonstration only",
+    "category": "test"
   }
 ]
 ```
 
-The example is the hash of the five UTF-8 bytes `hello`. It demonstrates matching, not cheat detection. Browser libraries are limited to 5 MB / 50,000 entries (remote sessions: 5,000), each file to 200 MB, and each check to 1,000 files. Oversized and unreadable files are reported separately. Browser file checks never upload data. Windows clients submit filenames, sizes, hashes and optional process IDs only after explicit consent.
+Supported categories: `review` (default for legacy entries), `cheat` (a staff claim requiring an evidence reference), `allowed`, and `test`. Tests and allowlisted matches are not counted as cheat review matches. Sources are retained as provenance metadata, not independently verified. Duplicate hashes and malformed entries are rejected. Browser imports support 50,000 entries / 5 MB; saved libraries and remote sessions support 5,000 entries. Each file is limited to 200 MB and each scan to 1,000 entries. Access failures and truncation limit coverage and are shown explicitly.
 
-## Scope
+No verified FiveM cheat feed is bundled. A matching hash establishes equality with a staff-provided signature; it does not prove the player cheated. No exact match or an empty library does not establish a clean PC. Renamed binaries with identical contents still match; modified binaries evade exact hash matching. Reports are self-reported and not attested; a modified client can fabricate evidence. This is not equivalent to commercial Ocean/NAPS detection, a whole-PC scan, or a process-memory anti-cheat. Do not use it for automatic bans.
 
-This is an MVP file-integrity workflow, **not a commercial-grade anti-cheat or a clone of Ocean/NAPS**. Native Windows clients optionally enumerate accessible running executables and hash their on-disk files; this is not process-memory inspection. It does not inspect deleted files, browser history, credentials, registry entries or the whole PC. No match does not prove a cheat-free PC; a match only establishes equality to a user-supplied signature, whose accuracy is not independently verified. Modified or unknown binaries will evade exact hash matching. Reports are self-reported, not attested; a modified client can fabricate evidence. Do not use it to automatically ban players. Not affiliated with Ocean, NAPS, Cfx.re, or Rockstar Games.
-
-## Staff sessions and Windows scanner
-
-1. Open the site locally and create a staff password (12+ characters). Passwords are salted and scrypt-hashed. For remote deployment, set `SENTINEL_ADMIN_PASSWORD` securely on the server before starting it; first-time browser setup is restricted to loopback connections. Staff tokens expire after six hours; sign-out revokes the token.
-2. Import verified signatures and create a session. The six-digit code is single-use and expires after 30 minutes. Share it privately.
-3. The player downloads and reviews either the native x64 scanner or the PowerShell folder scanner. The native scanner asks for the HTTPS server origin and code, a folder, separate opt-in to hash readable running executables, and permission to begin.
-4. The scanner saves a local JSON report and asks again before sending it. The server compares reported hashes against the session's signature snapshot, rather than trusting client-supplied match labels. Each session accepts one report.
-5. Staff refresh the session list, view the report and export it. Coverage limits, unreadable files and unverified results stay visible.
-
-### Build native client
-
-Use an official Go 1.24+ toolchain:
+## Build and checks
 
 ```sh
+npm test
 npm run test:scanner
 npm run build:scanner
+# Optional Linux browser integration check (requires Chromium):
+npm run test:browser
+python scripts/package-project.py
 ```
 
-Set `GO_BIN` if Go is not on PATH. This environment's build script also detects `/workspace/.tools/go/bin/go`. The build uses only Go standard-library packages; no external module downloads. Artifacts: `dist/sentinel-scanner-windows-amd64.exe` and `dist/checksums.txt`. These are served by `/scanner.exe` and `/scanner-checksums.txt`. Sources are in `client/`; PowerShell source is `scanner.ps1`.
+Go 1.24+ is needed to build or test the scanner. `GO_BIN` selects a toolchain; this cloud checkout also detects `/workspace/.tools/go/bin/go`. Builds require no external Go modules. Output: `dist/crimson-pc-check-windows-amd64.exe`, `dist/checksums.txt`, and `dist/crimson-pc-check.zip`. The ZIP contains the source, supplied logo, base Windows binary, checksums and launchers; it excludes local credentials and reports.
 
-The EXE is **unsigned**. Its checksum identifies this build; it does not replace publisher signing. Follow your Windows security policy. Do not disable antivirus or bypass platform warnings. Native Windows API code can be cross-compiled on Linux, but must be runtime-tested on a real Windows machine before operational use. Go core tests on Linux do not validate Windows process enumeration. The PowerShell script is provided for source review and selected-folder scanning; it has not been runtime-tested here.
+`npm run test:browser` starts isolated staff and local scanner servers, uses headless Chromium, exercises consent, collection, sharing, persistent signatures, re-analysis and downloads, and saves screenshots in ignored `.test-artifacts/`. Set `CHROMIUM_BIN` if Chromium is not on PATH. It does not validate Windows-specific APIs.
 
-### Hosting and data
+The Windows build is unsigned. Follow your Windows security policy; do not disable antivirus or bypass platform warnings. Its base checksum identifies the build, not its publisher. Core hashing, consent/transport logic and the browser wizard can be tested on Linux. Windows process APIs, automatic browser opening and the native folder picker need runtime testing on real Windows. The previous CLI version was exercised by the user on Windows; that does not validate the new UI/picker. The optional legacy PowerShell folder scanner is retained and has not been runtime-tested here.
 
-By default the server binds `127.0.0.1:3000`. Configure `HOST=0.0.0.0` only for intentional hosting behind an HTTPS reverse proxy. Set `PUBLIC_URL=https://your-check-domain.example` so the PowerShell download points to the right server; native clients ask for the origin explicitly. Both clients require HTTPS for remote servers. No TLS verification is disabled. Run one server process; JSON persistence is not designed for multi-instance hosting.
+## Hosting and storage
 
-`SENTINEL_DATA_DIR` overrides local `.sentinel/` storage. Keep it private and outside a publicly served directory. Auth metadata and reports persist there, with restrictive file permissions. Completed sessions are pruned after 24 hours when creating new sessions; expiry limits submission, not storage access. No file contents are stored. The upload token is scoped to one session; codes are rate-limited and redeemable once. A code is a private invitation, not verified player identity. Staff sessions and submissions are covered by API tests, including auth boundaries, replay rejection and server-side classification.
+Defaults: `HOST=127.0.0.1`, `PORT=3000`. For intentional remote hosting use an HTTPS reverse proxy and set `HOST=0.0.0.0` and `PUBLIC_URL=https://your-check-domain.example`. `PUBLIC_URL` configures the legacy PowerShell download; personalized EXEs use the staff site's actual origin. Clients require HTTPS for non-loopback staff servers. Never disable TLS verification. No public hosting is included.
 
-Not yet included: a verified cheat-signature feed, signed Windows releases, Windows runtime validation, tamper resistance, staff roles, production database/migrations, audits and deployment. Detection accuracy against actual FiveM cheats has not been established.
+`SENTINEL_DATA_DIR` changes the private storage directory. Run one server process; JSON persistence is not designed for concurrent replicas. Reports, session-scoped upload tokens and auth metadata live in `.sentinel/` with restrictive permissions. Completed sessions are pruned after 24 hours when creating new sessions. Expiry controls report submission, not immediate deletion. Authenticated staff can read stored reports. A code is a private invitation, not verified player identity. Library saves use optimistic revision checks to avoid overwriting another edit.
+
+Not included: a verified cheat-signature feed, signed/attested Windows clients, staff roles, production database/migrations, deployment or established detection accuracy against actual FiveM cheats. Independent tool; not affiliated with Ocean, NAPS, Cfx.re or Rockstar Games.

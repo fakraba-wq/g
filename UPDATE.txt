@@ -1,0 +1,17 @@
+CRIMSON PC CHECK V2 - UPDATE FROM SENTINEL
+
+1. Stop your OLD server window with Ctrl+C.
+2. Extract this ZIP into a new folder.
+3. Copy the contents of crimson-pc-check into your EXISTING sentinel folder,
+   replacing application files. Do NOT delete or replace the hidden .sentinel
+   folder: it contains your password configuration, saved library and reports.
+4. In that existing folder, double-click start-crimson.cmd.
+5. Refresh http://localhost:3000 in your browser. Sign in again if needed.
+
+Your old reports stay available. No personal state is included in this ZIP.
+Do not upload .sentinel to GitHub or share it.
+
+For a fresh installation, use QUICKSTART.txt.
+Old start-sentinel.cmd remains a compatibility shortcut.
+Use the new crimson-pc-check-windows-amd64.exe or the Guided scanner button,
+not an old copy of sentinel-scanner-windows-amd64.exe.

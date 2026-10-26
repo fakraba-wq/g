@@ -6,7 +6,7 @@ try {
   $uri = [Uri]$ServerUrl
   if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) { throw 'Use HTTPS, or localhost for development.' }
   $ServerUrl = $ServerUrl.TrimEnd('/')
-  Write-Host 'SENTINEL / WINDOWS FOLDER CHECK' -ForegroundColor Green
+  Write-Host 'CRIMSON PC CHECK / WINDOWS FOLDER CHECK' -ForegroundColor Green
   Write-Host 'This checks a folder you select. It does not establish that your PC is cheat-free.'
   Write-Host 'Only filenames, sizes and hashes may be sent. File contents stay on your PC.'
   $folder = Read-Host 'Full path of the folder to check'
@@ -42,7 +42,7 @@ try {
   if ($results.Count -eq 0) { throw 'No readable file entries found. No report submitted.' }
   $report = @{ results = @($results.ToArray()); coverageLimited = $limited }
   $json = $report | ConvertTo-Json -Depth 8
-  $localPath = Join-Path ([IO.Path]::GetTempPath()) "sentinel-$($session.sessionId).json"
+  $localPath = Join-Path ([IO.Path]::GetTempPath()) "crimson-$($session.sessionId).json"
   [IO.File]::WriteAllText($localPath, $json, (New-Object Text.UTF8Encoding($false)))
   Write-Host "Local report saved: $localPath"
   Write-Host "$($results.Count) entries. Coverage limited: $limited"

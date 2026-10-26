@@ -1,6 +1,6 @@
 import { randomBytes, randomInt, scryptSync, timingSafeEqual, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
-import { parseSignatures } from './scanner.js';
+import { parseSignatures, classifyHash } from './scanner.js';
 
 export async function createBackend(directory, configuredPassword = '') {
   if (configuredPassword && (configuredPassword.length < 12 || configuredPassword.length > 256)) throw new Error('SENTINEL_ADMIN_PASSWORD must contain 12–256 characters.');
@@ -9,6 +9,8 @@ export async function createBackend(directory, configuredPassword = '') {
   let state;
   try { state = JSON.parse(await readFile(stateFile, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; state = { auth: null, sessions: [] }; }
+  state.library ||= { entries: [], revision: 0, updatedAt: null };
+  parseSignatures(state.library.entries);
   const tokens = new Map(), limits = new Map();
   const secretHash = (password, salt) => scryptSync(password, salt, 64).toString('hex');
   let saveQueue = Promise.resolve();
@@ -29,7 +31,7 @@ export async function createBackend(directory, configuredPassword = '') {
     if (limits.size > 10000) for (const [key, entry] of limits) if (entry.until < now) limits.delete(key);
     if (value.count > maximum) fail(429, 'Too many requests. Try again in a minute.');
   }
-  const publicSession = session => ({ id: session.id, code: session.code, createdAt: session.createdAt, expiresAt: session.expiresAt, signatureCount: session.signatures.length, redeemed: !!session.redeemed, report: session.report || null });
+  const publicSession = session => ({ id: session.id, code: session.code, createdAt: session.createdAt, expiresAt: session.expiresAt, signatureCount: session.signatures.length, libraryRevision: session.libraryRevision ?? null, redeemed: !!session.redeemed, report: session.report || null, analyses: session.analyses || [] });
   return async function api(req, res, pathname) {
     if (!pathname.startsWith('/api/')) return false;
     const reply = (code, value) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
@@ -85,26 +87,48 @@ export async function createBackend(directory, configuredPassword = '') {
           const processId = origin === 'running-process' && Number.isInteger(file.processId) && file.processId > 0 && file.processId <= 4294967295 ? file.processId : undefined;
           if (file.sha256 !== undefined && file.sha256 !== null) {
             if (typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(file.sha256) || file.size > 200 * 1024 * 1024) fail(400, 'Invalid file hash or size.');
-            const sha256 = file.sha256.toLowerCase(), signature = library.get(sha256) || null;
-            return { name, size: file.size, sha256, signature, origin, processId, status: signature ? 'match' : library.size ? 'unmatched' : 'unverified' };
+            const sha256 = file.sha256.toLowerCase();
+            return { name, size: file.size, origin, processId, ...classifyHash(sha256, library) };
           }
           return { name, size: file.size, origin, processId, status: 'skipped', reason: 'Client could not hash this file.' };
         });
-        session.report = { tool: 'Sentinel Windows scanner', version: 1, completedAt: new Date().toISOString(), scope: 'Selected-folder file hashes and, if explicitly opted in, readable running executable file hashes. No process memory, registry or deleted-file inspection.', interpretation: 'Self-reported client evidence. No client attestation. A match is not proof of cheating; no match is not proof of a cheat-free PC.', coverageLimited: body.coverageLimited !== false, processScanRequested: body.processScanRequested === true, processScanLimited: body.processScanRequested === true && body.processScanLimited !== false, signaturesUsed: session.signatures, results };
+        session.report = { tool: 'Crimson PC Check', version: 2, completedAt: new Date().toISOString(), scope: 'Selected-folder file hashes and, if explicitly opted in, readable running executable file hashes. No process memory, registry or deleted-file inspection.', interpretation: 'Self-reported client evidence. No client attestation. A match is not proof of cheating; no match is not proof of a cheat-free PC.', libraryRevision: session.libraryRevision ?? null, coverageLimited: body.coverageLimited !== false, processScanRequested: body.processScanRequested === true, processScanLimited: body.processScanRequested === true && body.processScanLimited !== false, signaturesUsed: session.signatures, results };
         await save(); reply(201, { accepted: true }); return true;
       }
       const adminToken = req.headers.authorization?.replace(/^Bearer /, '');
       if (!adminToken || (tokens.get(adminToken) || 0) <= Date.now()) fail(401, 'Staff sign-in required.');
+      if (pathname === '/api/library' && req.method === 'GET') { reply(200, state.library); return true; }
+      if (pathname === '/api/library' && req.method === 'POST') {
+        if (body.baseRevision !== state.library.revision) fail(409, 'Library changed. Reload it before saving to avoid overwriting another edit.');
+        let library;
+        try { library = parseSignatures(body.signatures); } catch (error) { fail(400, error.message); }
+        if (library.size > 5000) fail(400, 'Saved libraries support at most 5,000 signatures.');
+        state.library = { entries: Array.from(library, ([sha256, entry]) => ({ sha256, ...entry })), revision: state.library.revision + 1, updatedAt: new Date().toISOString() };
+        await save(); reply(200, state.library); return true;
+      }
+      const analysisRoute = pathname.match(/^\/api\/sessions\/([a-f0-9-]{36})\/analyze$/);
+      if (analysisRoute && req.method === 'POST') {
+        const session = state.sessions.find(s => s.id === analysisRoute[1]);
+        if (!session?.report) fail(404, 'A submitted report is required.');
+        if (!state.library.entries.length) fail(409, 'Save a signature library before re-analyzing a report.');
+        session.analyses ||= [];
+        const last = session.analyses.at(-1);
+        if (last?.libraryRevision === state.library.revision) { reply(200, last); return true; }
+        const library = parseSignatures(state.library.entries);
+        const analysis = { ...session.report, analyzedAt: new Date().toISOString(), libraryRevision: state.library.revision, signaturesUsed: state.library.entries, results: session.report.results.map(result => result.sha256 ? { ...result, ...classifyHash(result.sha256, library) } : { ...result }) };
+        session.analyses.push(analysis); session.analyses = session.analyses.slice(-5);
+        await save(); reply(201, analysis); return true;
+      }
       if (pathname === '/api/auth/logout' && req.method === 'POST') { tokens.delete(adminToken); reply(200, { signedOut: true }); return true; }
       if (pathname === '/api/sessions' && req.method === 'GET') { reply(200, { sessions: state.sessions.slice().reverse().map(publicSession) }); return true; }
       if (pathname === '/api/sessions' && req.method === 'POST') {
         state.sessions = state.sessions.filter(s => s.createdAt > Date.now() - 24 * 60 * 60 * 1000);
         if (state.sessions.length >= 100) fail(429, 'Session limit reached. Sessions are retained for 24 hours.');
         let library;
-        try { library = parseSignatures(body.signatures || []); } catch (error) { fail(400, error.message); }
+        try { library = parseSignatures(body.signatures ?? state.library.entries); } catch (error) { fail(400, error.message); }
         if (library.size > 5000) fail(400, 'Remote sessions support at most 5,000 signatures.');
         let code; do { code = String(randomInt(100000, 1000000)); } while (state.sessions.some(s => s.code === code));
-        const session = { id: randomUUID(), code, createdAt: Date.now(), expiresAt: Date.now() + 30 * 60 * 1000, redeemed: false, signatures: Array.from(library, ([sha256, entry]) => ({ sha256, ...entry })) };
+        const session = { id: randomUUID(), code, createdAt: Date.now(), expiresAt: Date.now() + 30 * 60 * 1000, redeemed: false, libraryRevision: body.signatures === undefined ? state.library.revision : null, signatures: Array.from(library, ([sha256, entry]) => ({ sha256, ...entry })) };
         state.sessions.push(session); await save(); reply(201, publicSession(session)); return true;
       }
       const sessionRoute = pathname.match(/^\/api\/sessions\/([a-f0-9-]{36})$/);

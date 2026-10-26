@@ -9,7 +9,7 @@ const root = new URL('../', import.meta.url);
 const workspaceGo = fileURLToPath(new URL('../../.tools/go/bin/go', import.meta.url));
 const go = process.env.GO_BIN || (existsSync(workspaceGo) ? workspaceGo : 'go');
 await mkdir(new URL('dist/', root), { recursive: true });
-const filename = 'sentinel-scanner-windows-amd64.exe';
+const filename = 'crimson-pc-check-windows-amd64.exe';
 const output = fileURLToPath(new URL('dist/' + filename, root));
 const test = process.argv.includes('--test');
 const result = spawnSync(go, test ? ['test', './...'] : ['build', '-trimpath', '-ldflags=-s -w -buildid=', '-o', output, '.'], { cwd: new URL('client/', root), env: { ...process.env, GOCACHE: process.env.GOCACHE || join(tmpdir(), 'sentinel-go-cache'), GOTELEMETRY: 'off', ...(!test ? { GOOS: 'windows', GOARCH: 'amd64', CGO_ENABLED: '0' } : {}) }, stdio: 'inherit' });

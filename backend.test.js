@@ -23,6 +23,7 @@ test('authenticated staff-to-scanner workflow and report boundaries', async t =>
   const digest = '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
   await t.test('denies unauthenticated staff access and cross-origin writes', async () => {
     assert.equal((await request('sessions')).status, 401);
+    assert.equal((await request('library')).status, 401);
     assert.equal((await request('auth/setup', { password: 'not-relevant-password' }, null, { Origin: 'https://other.example' })).status, 403);
   });
   await t.test('sets up password hashing and a staff session without storing plaintext', async () => {
@@ -56,6 +57,22 @@ test('authenticated staff-to-scanner workflow and report boundaries', async t =>
     assert.equal(stored.data.report.results[0].processId, 1234);
     assert.equal(stored.data.report.processScanLimited, true);
     assert.equal((await request(`sessions/${session.id}/report`, { results: [] }, agent.uploadToken)).status, 409);
+  });
+  await t.test('saves a versioned library and re-analyzes without changing original evidence', async () => {
+    assert.equal((await request(`sessions/${session.id}/analyze`, {}, token)).status, 409);
+    const saved = await request('library', { baseRevision: 0, signatures: [{ sha256: digest, name: 'Harmless test fixture', source: 'Known hello test vector', category: 'test' }] }, token);
+    assert.equal(saved.status, 200); assert.equal(saved.data.revision, 1);
+    assert.equal((await request('library', { baseRevision: 0, signatures: [] }, token)).status, 409);
+    const analysis = await request(`sessions/${session.id}/analyze`, {}, token);
+    assert.equal(analysis.status, 201); assert.equal(analysis.data.results[0].status, 'test');
+    const stored = await request(`sessions/${session.id}`, undefined, token);
+    assert.equal(stored.data.report.results[0].status, 'match');
+    assert.equal(stored.data.analyses.length, 1); assert.equal(stored.data.analyses[0].libraryRevision, 1);
+    assert.equal((await request(`sessions/${session.id}/analyze`, {}, token)).status, 200);
+    assert.equal((await request(`sessions/${session.id}`, undefined, token)).data.analyses.length, 1);
+    const created = await request('sessions', {}, token); assert.equal(created.data.signatureCount, 1); assert.equal(created.data.libraryRevision, 1);
+    const persisted = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')); assert.equal(persisted.library.entries[0].category, 'test');
+    await createBackend(pathToFileURL(dir + sep));
   });
   await t.test('sign-out revokes the staff token', async () => {
     assert.equal((await request('auth/logout', {}, token)).status, 200);
