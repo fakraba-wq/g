@@ -64,10 +64,13 @@ func readLaunchConfig(path string) launchConfig {
 }
 func main() {
 	server := flag.String("server", "", "Staff server URL")
-	code := flag.String("code", "", "Six-digit session code")
+	code := flag.String("code", "", "Session PIN")
 	cli := flag.Bool("cli", false, "Use the legacy terminal interface")
 	noOpen := flag.Bool("no-open", false, "Print the guided interface URL without opening a browser")
 	flag.Parse()
+	if *cli || *noOpen {
+		enableConsole()
+	}
 	if path, err := os.Executable(); err == nil {
 		config := readLaunchConfig(path)
 		if *server == "" {
@@ -87,9 +90,11 @@ func main() {
 		err = runGuided(*server, *code, *noOpen)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Crimson PC Check:", err)
-		fmt.Println("Press Enter to close.")
-		bufio.NewReader(os.Stdin).ReadString('\n')
+		if *cli || *noOpen {
+			fmt.Fprintln(os.Stderr, "Crimson PC Check:", err)
+		} else {
+			showLaunchError(err.Error())
+		}
 		os.Exit(1)
 	}
 	if *cli {

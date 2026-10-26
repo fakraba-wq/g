@@ -40,6 +40,7 @@ type guidedApp struct {
 	currentServer  string
 	client         *http.Client
 	done           chan struct{}
+	lastSeen       time.Time
 	closeOnce      sync.Once
 }
 
@@ -50,7 +51,7 @@ func newGuidedApp(config launchConfig) *guidedApp {
 	}
 	return &guidedApp{token: hex.EncodeToString(bytes), config: config, state: guidedState{Phase: "idle", Message: "Choisissez ce que vous autorisez à vérifier."}, client: &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return errors.New("redirection refusée; utilisez l'adresse HTTPS finale")
-	}}, done: make(chan struct{})}
+	}}, done: make(chan struct{}), lastSeen: time.Now()}
 }
 func (app *guidedApp) phase(phase, message string) {
 	app.mu.Lock()
@@ -87,6 +88,10 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fail := func(status int, message string) { reply(status, map[string]string{"error": message}) }
 	var body struct {
+		Discovery bool   `json:"discovery"`
+		Paths     bool   `json:"paths"`
+		Accounts  bool   `json:"accounts"`
+		DiscordID string `json:"discordId"`
 		Server    string `json:"server"`
 		Code      string `json:"code"`
 		Folder    string `json:"folder"`
@@ -130,8 +135,14 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", types[r.URL.Path])
 		w.Write(content)
 	case r.Method == "GET" && r.URL.Path == "/api/config":
-		reply(200, app.config)
+		reply(200, struct {
+			launchConfig
+			Roots []scanRoot `json:"roots"`
+		}{app.config, standardRoots()})
 	case r.Method == "GET" && r.URL.Path == "/api/status":
+		app.mu.Lock()
+		app.lastSeen = time.Now()
+		app.mu.Unlock()
 		reply(200, app.snapshot())
 	case r.Method == "GET" && r.URL.Path == "/api/report":
 		state := app.snapshot()
@@ -169,8 +180,12 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(400, "Confirmez votre autorisation avant de commencer.")
 			return
 		}
-		if body.Folder == "" && !body.Processes && !body.Modules && !body.Boot && !body.Activity {
+		if body.Folder == "" && !body.Processes && !body.Modules && !body.Boot && !body.Activity && !body.Discovery && !body.Accounts {
 			fail(400, "Choisissez au moins une source de données à vérifier.")
+			return
+		}
+		if body.Accounts && body.DiscordID != "" && !validDiscordID(body.DiscordID) {
+			fail(400, "Discord ID : 17 à 20 chiffres, sans token ni mot de passe.")
 			return
 		}
 		if body.Folder != "" {
@@ -179,7 +194,7 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			info, err := os.Lstat(body.Folder)
-			if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			if err != nil || !info.IsDir() || unsafeLink(body.Folder, info) {
 				fail(400, "Choisissez un dossier accessible, pas un lien.")
 				return
 			}
@@ -198,7 +213,7 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		app.currentServer = server
 		app.currentSession = session{}
 		app.mu.Unlock()
-		go app.scan(ctx, server, strings.ToUpper(body.Code), body.Folder, scanOptions{Processes: body.Processes, Modules: body.Modules, Integrity: body.Integrity, Boot: body.Boot, Activity: body.Activity}, jobID)
+		go app.scan(ctx, server, strings.ToUpper(body.Code), body.Folder, scanOptions{Discovery: body.Discovery, Paths: body.Paths, Accounts: body.Accounts, DiscordID: body.DiscordID, Processes: body.Processes, Modules: body.Modules, Integrity: body.Integrity, Boot: body.Boot, Activity: body.Activity}, jobID)
 		reply(202, map[string]bool{"started": true})
 	case r.Method == "POST" && r.URL.Path == "/api/cancel":
 		app.mu.Lock()
@@ -309,17 +324,34 @@ func runGuided(server, code string, noOpen bool) error {
 	fmt.Println("Adresse privée locale :", url)
 	if !noOpen {
 		if err := openBrowser(url); err != nil {
-			fmt.Println("Ouverture automatique impossible. Ouvrez l'adresse locale ci-dessus.")
+			listener.Close()
+			return fmt.Errorf("ouverture de la fenêtre impossible; relancez avec -no-open pour le diagnostic: %w", err)
 		}
 	}
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
-	select {
-	case <-app.done:
-	case <-timer.C:
-	case err := <-serveErr:
-		if err != http.ErrServerClosed {
-			return err
+waitWindow:
+	for {
+		select {
+		case <-heartbeat.C:
+			app.mu.Lock()
+			last := app.lastSeen
+			app.mu.Unlock()
+			if time.Since(last) > 90*time.Second {
+				break waitWindow
+			}
+			continue
+		case <-app.done:
+			break waitWindow
+		case <-timer.C:
+			break waitWindow
+		case err := <-serveErr:
+			if err != http.ErrServerClosed {
+				return err
+			}
+			break waitWindow
 		}
 	}
 	app.mu.Lock()

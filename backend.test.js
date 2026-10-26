@@ -90,8 +90,16 @@ test('authenticated staff-to-scanner workflow and report boundaries', async t =>
     const response = await request(`sessions/${created.data.id}/report`, { results: [], options: { boot: true, activity: true }, evidence: { boot: { windowsVersion: 'Fixture OS', biosVendor: 'Fixture vendor', serialNumber: 'must-not-store' }, executions: [{ name: 'C:\\private\\sample.exe', timeUTC: '2026-01-01T10:00:00Z', source: 'Security', eventId: 4688, pathState: 'not-found', commandLine: 'must-not-store' }] } }, redeemed.data.uploadToken);
     assert.equal(response.status, 201);
     const stored = (await request(`sessions/${created.data.id}`, undefined, token)).data.report;
-    assert.equal(stored.version, 3); assert.equal(stored.evidence.executions[0].name, 'sample.exe');
+    assert.equal(stored.version, 4); assert.equal(stored.evidence.executions[0].name, 'sample.exe');
     assert.equal(JSON.stringify(stored).includes('must-not-store'), false);
+  });
+  await t.test('preserves authorized discovery paths and profiles but drops unconsented fields', async () => {
+    for(const consent of [false,true]){
+      const created=await request('sessions',{},token);const redeemed=await request('sessions/redeem',{code:created.data.code});
+      const response=await request(`sessions/${created.data.id}/report`,{results:[{name:'fixture.exe',size:5,sha256:digest,origin:'standard-location',path:'C:\\Users\\fixture\\Desktop\\fixture.exe'}],options:{discovery:true,paths:consent,accounts:consent},evidence:{accounts:[{platform:'steam',id:'76561198000000001',name:'Fixture profile',source:'steam-local-profile',token:'must-not-store',verified:true}]}},redeemed.data.uploadToken);assert.equal(response.status,201);
+      const stored=(await request(`sessions/${created.data.id}`,undefined,token)).data.report;
+      assert.equal(stored.results[0].origin,'standard-location');assert.equal(!!stored.results[0].path,consent);assert.equal(!!stored.evidence.accounts,consent);assert.equal(JSON.stringify(stored).includes('must-not-store'),false);if(consent)assert.equal(stored.evidence.accounts[0].verified,false);
+    }
   });
   await t.test('sign-out revokes the staff token', async () => {
     assert.equal((await request('auth/logout', {}, token)).status, 200);

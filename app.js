@@ -31,12 +31,13 @@ function renderResults() {
   const labels = { match: 'Signature match · review', unmatched: 'No exact match', unverified: 'Unverified · no library', skipped: 'Skipped', error: 'Read failed', allowed: 'Staff allowlisted', test: 'Harmless test match' };
   $('result-rows').replaceChildren();
   const query = $('result-search').value.trim().toLowerCase(), filter = $('result-filter').value;
-  const visible = results.filter(result => (filter === 'all' || (filter === 'skipped' ? ['skipped', 'error'].includes(result.status) : result.status === filter)) && [result.name, result.sha256, result.signature?.name, result.signature?.source].filter(Boolean).join(' ').toLowerCase().includes(query));
+  const visible = results.filter(result => (filter === 'all' || (filter === 'skipped' ? ['skipped', 'error'].includes(result.status) : result.status === filter)) && [result.name, result.path, result.sha256, result.signature?.name, result.signature?.source].filter(Boolean).join(' ').toLowerCase().includes(query));
   visible.sort((a, b) => Number(b.status === 'match') - Number(a.status === 'match'));
   for (const result of visible) {
     const tr = document.createElement('tr');
     const name = document.createElement('td'); name.textContent = result.name;
-    if (result.origin) { const origin = document.createElement('small'); origin.textContent = result.origin === 'loaded-module' ? `FiveM DLL · PID ${result.processId || 'unavailable'}` : result.origin === 'running-process' ? `Running executable${result.processId ? ' · PID ' + result.processId : ''}` : 'Selected folder'; name.append(origin); }
+    if (result.origin) { const origin = document.createElement('small'); origin.textContent = result.origin === 'loaded-module' ? `FiveM DLL · PID ${result.processId || 'unavailable'}` : result.origin === 'running-process' ? `Running executable${result.processId ? ' · PID ' + result.processId : ''}` : result.origin==='standard-location'?'Standard discovery location':'Selected folder'; name.append(origin); }
+    if(result.path){const path=document.createElement('code');path.className='file-location';path.textContent=result.path;name.append(path);}
     const size = document.createElement('td'); size.textContent = formatSize(result.size);
     const details = document.createElement('td');
     const hash = document.createElement('code'); hash.textContent = result.sha256 || result.reason; details.append(hash);

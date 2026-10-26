@@ -12,7 +12,7 @@ await mkdir(new URL('dist/', root), { recursive: true });
 const filename = 'crimson-pc-check-windows-amd64.exe';
 const output = fileURLToPath(new URL('dist/' + filename, root));
 const test = process.argv.includes('--test');
-const result = spawnSync(go, test ? ['test', './...'] : ['build', '-trimpath', '-ldflags=-s -w -buildid=', '-o', output, '.'], { cwd: new URL('client/', root), env: { ...process.env, GOCACHE: process.env.GOCACHE || join(tmpdir(), 'sentinel-go-cache'), GOTELEMETRY: 'off', ...(!test ? { GOOS: 'windows', GOARCH: 'amd64', CGO_ENABLED: '0' } : {}) }, stdio: 'inherit' });
+const result = spawnSync(go, test ? ['test', './...'] : ['build', '-trimpath', '-ldflags=-s -w -buildid= -H=windowsgui', '-o', output, '.'], { cwd: new URL('client/', root), env: { ...process.env, GOCACHE: process.env.GOCACHE || join(tmpdir(), 'sentinel-go-cache'), GOTELEMETRY: 'off', ...(!test ? { GOOS: 'windows', GOARCH: 'amd64', CGO_ENABLED: '0' } : {}) }, stdio: 'inherit' });
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status || 1);
 if (test) process.exit(0);

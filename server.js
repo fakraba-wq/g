@@ -25,12 +25,14 @@ const server = http.createServer(async (req, res) => {
   if (invitedDownload && req.method === 'GET') {
     const session = api.findInvite(invitedDownload[1]);
     if (!session || session.redeemed || session.report) { res.writeHead(410, { 'Content-Type': 'text/plain' }); return res.end('Invitation expired or already used. Ask staff for a new invitation.'); }
-    if (!api.publicOrigin) { res.writeHead(409, { 'Content-Type': 'text/plain' }); return res.end('Internet invitations require a configured public HTTPS address.'); }
+    let inviteOrigin=api.publicOrigin;
+    if (!inviteOrigin && ['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) {try {const local=new URL('http://'+req.headers.host);if(['localhost','127.0.0.1','[::1]'].includes(local.hostname)&&!local.username&&!local.password&&local.pathname==='/')inviteOrigin=local.origin;}catch{}}
+    if (!inviteOrigin) { res.writeHead(409, { 'Content-Type': 'text/plain' }); return res.end('Remote invitations require a public HTTPS address; local links work only on this PC.'); }
     try {
       const binary = await readFile(new URL('./dist/crimson-pc-check-windows-amd64.exe', import.meta.url));
       const expected = (await readFile(new URL('./dist/checksums.txt', import.meta.url), 'utf8')).trim().split(/\s/)[0];
       if (!/^[a-f0-9]{64}$/.test(expected) || createHash('sha256').update(binary).digest('hex') !== expected) throw new Error('Scanner checksum mismatch');
-      const config = Buffer.from(JSON.stringify({ server: api.publicOrigin, code: session.code }));
+      const config = Buffer.from(JSON.stringify({ server: inviteOrigin, code: session.code }));
       const footer = Buffer.alloc(12); footer.writeUInt32LE(config.length); footer.write('CRMSNCFG', 4, 'ascii');
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="crimson-session-${session.code}.exe"`, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
       return res.end(Buffer.concat([binary, config, footer]));

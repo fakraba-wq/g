@@ -12,8 +12,28 @@ import (
 	"unsafe"
 )
 
+// Open a separate browser app window, with no terminal and no browser tabs.
+// Never invoke a shell or an executable from the current working directory.
 func openBrowser(url string) error {
+	candidates := []string{}
+	for _, key := range []string{"ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"} {
+		if base := os.Getenv(key); base != "" {
+			candidates = append(candidates, filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"), filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"))
+		}
+	}
+	for _, path := range candidates {
+		if info, err := os.Stat(path); err != nil || info.IsDir() {
+			continue
+		}
+		command := exec.Command(path, "--app="+url, "--window-size=1000,850")
+		command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		if command.Start() == nil {
+			go command.Wait()
+			return nil
+		}
+	}
 	command := exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "rundll32.exe"), "url.dll,FileProtocolHandler", url)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := command.Start(); err != nil {
 		return err
 	}

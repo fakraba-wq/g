@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
 function showMessage(message) { $('invite-message').textContent = message; }
 async function copy(text) {
   try { await navigator.clipboard.writeText(text); showMessage('Copied. Share the invitation privately with the intended player.'); }
-  catch { showMessage('Clipboard access unavailable. Select and copy the displayed value manually.'); }
+  catch { const field=document.createElement('textarea');field.value=text;document.body.append(field);field.select();let copied=false;try{copied=document.execCommand('copy');}catch{}field.remove();showMessage(copied?'Copied.':'Copy unavailable. Select the URL shown and press Ctrl+C.'); }
 }
 export function refreshInvite(session) {
   if (!$('invite-dialog')?.open || current?.id !== session.id) return;
@@ -17,8 +17,11 @@ export function refreshInvite(session) {
   $('invite-progress').max = 100;
   if (session.report) $('invite-progress').value = 100; else if (session.redeemed && !expired) $('invite-progress').removeAttribute('value'); else $('invite-progress').value = 0;
   $('invite-percentage').textContent = session.report ? '100% · report received' : session.redeemed && !expired ? 'Progress not reported by client' : expired ? 'Expired' : 'Not started';
-  const shareable = !!session.inviteUrl && !expired;
-  $('invite-url').value = shareable ? session.inviteUrl : '';
+  const url=session.inviteUrl || location.origin + session.invitePath;
+  const shareable = !expired;
+  $('invite-copy-link').textContent=session.inviteUrl?'Link':'Local link';
+  $('invite-copy-link-small').textContent=session.inviteUrl?'Copy link':'Copy local link';
+  $('invite-url').value = shareable ? url : '';
   $('invite-url').placeholder = 'Configure a public HTTPS address to enable sharing';
   for (const id of ['invite-copy-link', 'invite-copy-link-small', 'invite-download-qr', 'invite-copy-qr']) $(id).disabled = !shareable;
   $('invite-qr').hidden = !shareable; $('invite-qr-placeholder').hidden = shareable;
@@ -26,7 +29,7 @@ export function refreshInvite(session) {
   $('invite-preview').href = session.inviteUrl || (location.origin + session.invitePath);
   $('invite-preview').textContent = session.inviteUrl ? 'Open player page ↗' : 'Preview locally on this PC ↗';
   $('invite-windows').disabled = expired || session.redeemed;
-  if (shareable) QRCode.toCanvas($('invite-qr'), session.inviteUrl, { width: 160, margin: 3, errorCorrectionLevel: 'M', color: { dark: '#100c10', light: '#ffffff' } }).catch(() => showMessage('QR generation failed. The invitation URL can still be copied.'));
+  if (shareable) QRCode.toCanvas($('invite-qr'), url, { width: 160, margin: 3, errorCorrectionLevel: 'M', color: { dark: '#100c10', light: '#ffffff' } }).catch(() => showMessage('QR generation failed. The invitation URL can still be copied.'));
 }
 export function openInvite(session, handlers) {
   current = session; downloadScanner = handlers.download; readSession = handlers.read;
@@ -37,14 +40,14 @@ export function setupInvites() {
   $('invite-close').addEventListener('click', close); $('invite-close-bottom').addEventListener('click', close);
   $('invite-dialog').addEventListener('click', event => { if (event.target === $('invite-dialog')) { const bounds = $('invite-dialog').getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close(); } });
   $('invite-copy-pin').addEventListener('click', () => copy(current.code));
-  for (const id of ['invite-copy-link', 'invite-copy-link-small']) $(id).addEventListener('click', () => { if (current?.inviteUrl) copy(current.inviteUrl); });
+  for (const id of ['invite-copy-link', 'invite-copy-link-small']) $(id).addEventListener('click', () => { if (current) copy(current.inviteUrl || location.origin + current.invitePath); });
   $('invite-windows').addEventListener('click', () => { if (current) downloadScanner(current, $('invite-windows')); });
   $('invite-download-qr').addEventListener('click', () => {
-    if (!current?.inviteUrl) return;
+    if (!current) return;
     $('invite-qr').toBlob(blob => { if (!blob) return; const url = URL.createObjectURL(blob), anchor = document.createElement('a'); anchor.href = url; anchor.download = `crimson-invite-${current.code}.png`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 3000); });
   });
   $('invite-copy-qr').addEventListener('click', () => {
-    if (!current?.inviteUrl || !globalThis.ClipboardItem) { showMessage('Image clipboard not supported. Use Download QR.'); return; }
+    if (!current || !globalThis.ClipboardItem) { showMessage('Image clipboard not supported. Use Download QR.'); return; }
     $('invite-qr').toBlob(async blob => { try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); showMessage('QR image copied.'); } catch { showMessage('Image copy unavailable. Use Download QR.'); } });
   });
   setInterval(async () => { if (!$('invite-dialog').open || !current || !readSession) return; try { refreshInvite(await readSession(current.id)); } catch (error) { showMessage(error.message); } }, 10000);

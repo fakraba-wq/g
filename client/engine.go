@@ -13,9 +13,23 @@ func scanSelection(ctx context.Context, folder string, processes bool, progress 
 	return scanWithOptions(ctx, folder, scanOptions{Processes: processes}, progress)
 }
 func scanWithOptions(ctx context.Context, folder string, options scanOptions, progress func(int)) (scanReport, error) {
+	if !options.Accounts {
+		options.DiscordID = ""
+	}
 	processes := options.Processes
 	report := scanReport{Results: []entry{}, ProcessScanRequested: processes, Options: options}
+	seenPaths := map[string]bool{}
 	add := func(result entry) {
+		if result.sourcePath != "" {
+			key := strings.ToLower(result.sourcePath)
+			if seenPaths[key] {
+				return
+			}
+			seenPaths[key] = true
+		}
+		if !options.Paths {
+			result.Path = ""
+		}
 		report.Results = append(report.Results, result)
 		if result.SHA256 == "" {
 			report.CoverageLimited = true
@@ -29,7 +43,7 @@ func scanWithOptions(ctx context.Context, folder string, options scanOptions, pr
 			return report, errors.New("choisissez un dossier sur un volume local")
 		}
 		info, err := os.Lstat(folder)
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		if err != nil || !info.IsDir() || unsafeLink(folder, info) {
 			return report, errors.New("dossier introuvable ou inaccessible")
 		}
 		err = filepath.WalkDir(folder, func(path string, d fs.DirEntry, walkErr error) error {
@@ -44,14 +58,21 @@ func scanWithOptions(ctx context.Context, folder string, options scanOptions, pr
 				report.CoverageLimited = true
 				return filepath.SkipAll
 			}
-			if d.Type()&os.ModeSymlink != 0 {
+			if d.Type()&os.ModeSymlink != 0 || unsafeLink(path, nil) {
 				report.CoverageLimited = true
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if d.IsDir() {
 				return nil
 			}
-			add(inspectEnriched(ctx, path, "selected-folder", 0, options.Integrity))
+			item := inspectEnriched(ctx, path, "selected-folder", 0, options.Integrity)
+			if options.Paths {
+				item.Path = path
+			}
+			add(item)
 			return nil
 		})
 		if err != nil {
@@ -82,6 +103,9 @@ func scanWithOptions(ctx context.Context, folder string, options scanOptions, pr
 				break
 			}
 			result := inspectEnriched(ctx, p.Path, "running-process", p.PID, options.Integrity)
+			if options.Paths {
+				result.Path = p.Path
+			}
 			if result.SHA256 == "" {
 				report.ProcessScanLimited = true
 			}
@@ -116,6 +140,9 @@ func scanWithOptions(ctx context.Context, folder string, options scanOptions, pr
 				break
 			}
 			item := inspectEnriched(ctx, module.Path, "loaded-module", module.PID, options.Integrity)
+			if options.Paths {
+				item.Path = module.Path
+			}
 			if item.SHA256 == "" {
 				limited = true
 			}
@@ -134,9 +161,58 @@ func scanWithOptions(ctx context.Context, folder string, options scanOptions, pr
 	} else {
 		report.Evidence.Collection = append(report.Evidence.Collection, collection{Key: "modules", State: "not-requested", Note: "Not authorized in this scan."})
 	}
+	if options.Discovery {
+		roots := standardRoots()
+		if options.Paths {
+			report.Evidence.Roots = roots
+		}
+		beforeDiscovery := len(report.Results)
+		_, limited, err := discoverFiles(ctx, roots, maxFiles-len(report.Results), func(path string) {
+			item := inspectEnriched(ctx, path, "standard-location", 0, options.Integrity)
+			if options.Paths {
+				item.Path = path
+			}
+			add(item)
+		})
+		if err != nil {
+			return report, err
+		}
+		state := "collected"
+		if len(roots) == 0 {
+			state = "unavailable"
+			limited = true
+		}
+		if limited && state != "unavailable" {
+			state = "partial"
+		}
+		report.CoverageLimited = report.CoverageLimited || limited
+		report.Evidence.Collection = append(report.Evidence.Collection, collection{Key: "discovery", State: state, Count: len(report.Results) - beforeDiscovery, Note: "EXE/DLL in listed current-user locations only; 1000 total files, 50000 directory entries, depth 8 and two-minute discovery limit. Links, network locations and cache directories excluded."})
+	} else {
+		report.Evidence.Collection = append(report.Evidence.Collection, collection{Key: "discovery", State: "not-requested", Note: "Standard locations not authorized."})
+	}
+	if options.Accounts {
+		accounts, limited := steamAccounts()
+		report.Evidence.Accounts = accounts
+		if validDiscordID(options.DiscordID) {
+			report.Evidence.Accounts = append(report.Evidence.Accounts, account{Platform: "discord", ID: options.DiscordID, Name: "Discord ID supplied by player", Source: "player-provided"})
+		}
+		state := "collected"
+		if limited {
+			state = "partial"
+		}
+		if len(accounts) == 0 && options.DiscordID == "" {
+			state = "unavailable"
+		}
+		report.Evidence.Collection = append(report.Evidence.Collection, collection{Key: "accounts", State: state, Count: len(report.Evidence.Accounts), Note: "Steam locally remembered profile identifiers and optional player-provided Discord ID; not verified ownership or a complete account inventory. No tokens, passwords or session files."})
+	}
 	system := systemEvidence(ctx, options.Boot, options.Activity)
 	report.Evidence.Boot = system.Boot
 	report.Evidence.Executions = system.Executions
+	if !options.Paths {
+		for i := range report.Evidence.Executions {
+			report.Evidence.Executions[i].Path = ""
+		}
+	}
 	report.Evidence.WindowStartUTC = system.WindowStartUTC
 	report.Evidence.Collection = append(report.Evidence.Collection, system.Collection...)
 	for _, status := range system.Collection {
@@ -158,7 +234,7 @@ func scanWithOptions(ctx context.Context, folder string, options scanOptions, pr
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
-	if len(report.Results) == 0 && !options.Boot && !options.Activity && !options.Modules {
+	if len(report.Results) == 0 && !options.Boot && !options.Activity && !options.Modules && !options.Discovery && !options.Accounts {
 		return report, errors.New("aucun fichier accessible; choisissez un dossier ou activez les processus sur Windows")
 	}
 	return report, nil

@@ -1,4 +1,4 @@
-CRIMSON PC CHECK V3 - UPDATE FROM CRIMSON V2 / SENTINEL
+CRIMSON PC CHECK V4 - UPDATE FROM CRIMSON V3 / V2 / SENTINEL
 
 1. Stop your OLD server window with Ctrl+C.
 2. Extract this ZIP into a new folder.
@@ -20,3 +20,11 @@ V3 adds optional Windows evidence panels and private player invitations with QR.
 Public player links need a real HTTPS domain and deployed server; see HOSTING.md.
 Keep your current .sentinel folder. Old six-digit codes remain supported.
 Download a new scanner to use the optional V3 sources.
+
+V4 adds a working same-PC Copy local link, automatic EXE/DLL discovery in
+listed standard user folders, optional full file paths and optional Steam
+profile identifiers / player-provided Discord ID. Windows scanner launches
+without CMD in a Crimson browser app window when Edge/Chrome is available.
+Download a new session scanner after updating. Existing downloaded EXEs do
+not update themselves. Preserve .sentinel to keep your signature library.
+New Windows launch/profile functions need testing on your Windows PC.

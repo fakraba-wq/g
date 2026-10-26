@@ -24,6 +24,8 @@ const maxSize int64 = 200 * 1024 * 1024
 const maxFiles = 1000
 
 type entry struct {
+	sourcePath      string
+	Path            string  `json:"path,omitempty"`
 	Name            string  `json:"name"`
 	Size            int64   `json:"size"`
 	SHA256          string  `json:"sha256,omitempty"`
@@ -70,7 +72,7 @@ func inspectContext(ctx context.Context, path, origin string, pid uint32) entry 
 	return inspectEnriched(ctx, path, origin, pid, false)
 }
 func inspectEnriched(ctx context.Context, path, origin string, pid uint32, integrity bool) entry {
-	result := entry{Name: filepath.Base(path), Origin: origin, ProcessID: pid}
+	result := entry{Name: filepath.Base(path), Origin: origin, ProcessID: pid, sourcePath: filepath.Clean(path)}
 	if !localInputPath(path) {
 		result.Reason = "Network or unavailable volume not inspected"
 		return result

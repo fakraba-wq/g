@@ -51,7 +51,7 @@ if($env:CRIMSON_COLLECT_ACTIVITY -eq '1'){
    foreach($event in $items){
     $xml=[xml]$event.ToXml();$image='';foreach($field in $xml.Event.EventData.Data){if($field.Name -eq $config.field){$image=[string]$field.'#text'}}
     if(!$image){continue};$state='unknown';if($image -match '^[A-Za-z]:\\'){try{$drive=New-Object IO.DriveInfo([IO.Path]::GetPathRoot($image));if($drive.DriveType -eq 'Fixed' -or $drive.DriveType -eq 'Removable'){if(Test-Path -LiteralPath $image -PathType Leaf -ErrorAction Stop){$state='present'}else{$state='not-found'}}}catch{}}
-    $events+=@{name=[IO.Path]::GetFileName($image);timeUTC=$event.TimeCreated.ToUniversalTime().ToString('o');source=$config.log;eventId=$config.id;pathState=$state}
+    $events+=@{path=$image;name=[IO.Path]::GetFileName($image);timeUTC=$event.TimeCreated.ToUniversalTime().ToString('o');source=$config.log;eventId=$config.id;pathState=$state}
    }
   }catch{}
  }

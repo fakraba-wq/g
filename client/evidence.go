@@ -8,11 +8,15 @@ import (
 )
 
 type scanOptions struct {
-	Processes bool `json:"processes"`
-	Modules   bool `json:"modules"`
-	Integrity bool `json:"integrity"`
-	Boot      bool `json:"boot"`
-	Activity  bool `json:"activity"`
+	Discovery bool   `json:"discovery"`
+	Paths     bool   `json:"paths"`
+	Accounts  bool   `json:"accounts"`
+	DiscordID string `json:"discordId,omitempty"`
+	Processes bool   `json:"processes"`
+	Modules   bool   `json:"modules"`
+	Integrity bool   `json:"integrity"`
+	Boot      bool   `json:"boot"`
+	Activity  bool   `json:"activity"`
 }
 type peInfo struct {
 	Machine       string `json:"machine"`
@@ -36,6 +40,7 @@ type bootFacts struct {
 	FastBootEnabled   *bool  `json:"fastBootEnabled,omitempty"`
 }
 type execution struct {
+	Path      string `json:"path,omitempty"`
 	Name      string `json:"name"`
 	TimeUTC   string `json:"timeUTC"`
 	Source    string `json:"source"`
@@ -43,6 +48,8 @@ type execution struct {
 	PathState string `json:"pathState"`
 }
 type evidence struct {
+	Accounts       []account    `json:"accounts,omitempty"`
+	Roots          []scanRoot   `json:"roots,omitempty"`
 	Boot           *bootFacts   `json:"boot,omitempty"`
 	Executions     []execution  `json:"executions,omitempty"`
 	WindowStartUTC string       `json:"windowStartUTC,omitempty"`

@@ -1,4 +1,4 @@
-CRIMSON PC CHECK V3 - WINDOWS
+CRIMSON PC CHECK V4 - WINDOWS
 
 1. Install Node.js 22+ from https://nodejs.org if it is not installed.
 2. Extract the ZIP. Double-click start-crimson.cmd. Keep this window open.
@@ -10,7 +10,7 @@ CRIMSON PC CHECK V3 - WINDOWS
    For local testing, click Guided scanner on the session row.
    For a player on another PC, first configure HTTPS hosting (HOSTING.md),
    then copy the private player link or QR from the invitation dialog.
-6. Open the downloaded EXE. A local browser wizard opens with server and code
+6. Open the downloaded EXE. A Crimson window opens (Edge/Chrome app mode, browser fallback) with server and code
    already filled in. No PROCESSES / YES / SEND terminal commands required.
 7. Choose a folder and/or opt in to running executable file hashing.
    Check the permission box, then click Commencer la verification.
@@ -43,3 +43,15 @@ The scanner offers FiveM loaded DLL hashes, cached Windows signature trust,
 boot/system facts and existing execution event metadata. Every option is
 explicit. Unavailable logs/access are displayed as limited coverage.
 No external cheater databases are connected. No tool detects every cheat.
+
+V4 OPTIONS
+The standard-location option is selected initially: review its listed
+Desktop/Downloads/Documents/Temp/FiveM locations, then authorize the scan.
+It finds EXE/DLL files within limits; it still needs saved signatures for
+exact matches. You can add a specific folder or disable standard discovery.
+Enable full paths if you want staff to see where a detected file is located.
+Enable profiles only if you want to share locally remembered Steam public
+profile IDs; a Discord ID is optional and entered by the player, not extracted.
+No automatic Discord account verification or all-account inventory is claimed.
+Copy local link now works, but only on this same PC. Internet invitations
+still need a deployed HTTPS server.

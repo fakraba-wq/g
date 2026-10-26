@@ -24,4 +24,6 @@ Back up private staff storage securely before upgrades. Docker stores it in the 
 
 Use one application instance: JSON persistence is not a shared database for replicas. Session expiry stops new submissions, not immediate deletion of existing reports. Existing retention prunes old sessions when new ones are created. Staff authentication is required for report access. Treat invitations and downloaded personalized EXEs as private bearer invitations. Rotate the staff password and invalidate sessions if private state is exposed.
 
-The Windows scanner is unsigned. Follow Windows security policy. Linux downloads, external cheater-database providers, screenshot capture, private-account scraping and process-memory inspection are not implemented. A public link lets the player choose and authorize a check; it does not remotely scan their PC by itself.
+The Windows scanner is unsigned. Follow Windows security policy. Linux downloads, external cheater-database providers, screenshot capture, private-account contents/session scraping and process-memory inspection are not implemented. A public link lets the player choose and authorize a check; it does not remotely scan their PC by itself.
+
+V4 local invitations now support same-PC loopback downloads without a public domain; this does not make the site reachable on other PCs. Full paths and local Steam public profile identifiers remain explicit per-scan options. Discord IDs are player-provided, unverified, and no Discord OAuth application is configured.

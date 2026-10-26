@@ -1,7 +1,7 @@
 import { randomBytes, randomInt, scryptSync, timingSafeEqual, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { parseSignatures, classifyHash } from './scanner.js';
-import { sanitizeEvidence, sanitizePE, trustStates } from './report-model.js';
+import { sanitizeEvidence, sanitizePE, sanitizePath, trustStates } from './report-model.js';
 
 export async function createBackend(directory, configuredPassword = '', settings = {}) {
   if (configuredPassword && (configuredPassword.length < 12 || configuredPassword.length > 256)) throw new Error('SENTINEL_ADMIN_PASSWORD must contain 12–256 characters.');
@@ -94,14 +94,14 @@ export async function createBackend(directory, configuredPassword = '', settings
         if (session.expiresAt <= Date.now()) fail(410, 'Session expired.');
         if (session.report) fail(409, 'A report has already been submitted.');
         const collected = sanitizeEvidence(body);
-        if (!Array.isArray(body.results) || body.results.length > 1000 || (!body.results.length && !collected.options.boot && !collected.options.modules && !collected.options.activity)) fail(400, 'Report needs file results or an explicitly authorized evidence collection.');
+        if (!Array.isArray(body.results) || body.results.length > 1000 || (!body.results.length && !collected.options.boot && !collected.options.modules && !collected.options.activity && !collected.options.discovery && !collected.options.accounts)) fail(400, 'Report needs file results or an explicitly authorized evidence collection.');
         const library = parseSignatures(session.signatures);
         const results = body.results.map(file => {
           if (!file || typeof file.name !== 'string' || !file.name || file.name.length > 500 || !Number.isSafeInteger(file.size) || file.size < 0) fail(400, 'Invalid file result.');
           const name = file.name.split(/[\\/]/).pop();
-          const origin = file.origin === 'loaded-module' && collected.options.modules ? 'loaded-module' : file.origin === 'running-process' && collected.options.processes ? 'running-process' : 'selected-folder';
+          const origin = file.origin === 'standard-location' && collected.options.discovery ? 'standard-location' : file.origin === 'loaded-module' && collected.options.modules ? 'loaded-module' : file.origin === 'running-process' && collected.options.processes ? 'running-process' : 'selected-folder';
           const processId = ['running-process', 'loaded-module'].includes(origin) && Number.isInteger(file.processId) && file.processId > 0 && file.processId <= 4294967295 ? file.processId : undefined;
-          const metadata = collected.options.integrity ? { pe: sanitizePE(file.pe), integrityStatus: trustStates.has(file.integrityStatus) ? file.integrityStatus : undefined } : {};
+          const metadata = {...(collected.options.paths ? {path:sanitizePath(file.path)} : {}),...(collected.options.integrity ? { pe: sanitizePE(file.pe), integrityStatus: trustStates.has(file.integrityStatus) ? file.integrityStatus : undefined } : {})};
           if (file.sha256 !== undefined && file.sha256 !== null) {
             if (typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(file.sha256) || file.size > 200 * 1024 * 1024) fail(400, 'Invalid file hash or size.');
             const sha256 = file.sha256.toLowerCase();
@@ -110,8 +110,8 @@ export async function createBackend(directory, configuredPassword = '', settings
           return { name, size: file.size, origin, processId, status: 'skipped', reason: 'Client could not hash this file.' };
         });
         session.report = { tool: 'Crimson PC Check', version: 2, completedAt: new Date().toISOString(), scope: 'Selected-folder file hashes and, if explicitly opted in, readable running executable file hashes. No process memory, registry or deleted-file inspection.', interpretation: 'Self-reported client evidence. No client attestation. A match is not proof of cheating; no match is not proof of a cheat-free PC.', libraryRevision: session.libraryRevision ?? null, coverageLimited: body.coverageLimited !== false, processScanRequested: body.processScanRequested === true, processScanLimited: body.processScanRequested === true && body.processScanLimited !== false, signaturesUsed: session.signatures, results };
-        session.report.version = 3;
-        session.report.scope = 'Authorized file hashes, optional FiveM DLL image metadata, PE/cache-only trust, boot metadata and existing bounded execution events. No memory dumps, account contents, command lines or screenshots.';
+        session.report.version = 4;
+        session.report.scope = 'Authorized file hashes, optional FiveM DLL image metadata, PE/cache-only trust, boot metadata, existing bounded execution events, optional local profile identifiers and full paths. No memory dumps, authentication data, command lines or screenshots.';
         Object.assign(session.report, collected);
         await save(); reply(201, { accepted: true }); return true;
       }

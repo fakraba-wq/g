@@ -31,3 +31,9 @@ test('ordinary unsigned files and missing event paths are not converted into che
   const summary = reportSummary({ results: [{ name: 'normal.exe', sha256: 'a'.repeat(64), status: 'unmatched', integrityStatus: 'unsigned', pe: { timestamp: 0 } }], evidence: { executions: [{ pathState: 'not-found' }] } });
   assert.equal(summary.matches, 0); assert.equal(summary.digestMismatches, 0); assert.equal(summary.integrity, 1); assert.equal(summary.activity, 1);
 });
+
+test('full paths and profile identifiers require their own explicit collection options', () => {
+  const evidence={roots:[{label:'Fixture',path:'C:\\Users\\fixture\\Desktop'}],executions:[{name:'sample.exe',path:'C:\\fixture\\sample.exe',timeUTC:'2026-01-01T10:00:00Z',source:'Security',eventId:4688}],accounts:[{platform:'steam',id:'76561198000000001',name:'Fixture persona',source:'steam-local-profile',password:'private',token:'private',verified:true},{platform:'discord',id:'10000000000000000',name:'Fixture supplied ID',source:'player-provided'},{platform:'discord',id:'10000000000000001',source:'extracted-token'}]};
+  const declined=sanitizeEvidence({options:{activity:true,discovery:true},evidence});assert.equal(declined.evidence.accounts,undefined);assert.equal(declined.evidence.roots,undefined);assert.equal(declined.evidence.executions[0].path,undefined);
+  const accepted=sanitizeEvidence({options:{accounts:true,paths:true,discovery:true,activity:true},evidence});assert.equal(accepted.evidence.accounts.length,2);assert.equal(accepted.evidence.accounts[0].verified,false);assert.equal(accepted.evidence.executions[0].path,evidence.executions[0].path);assert.equal(accepted.evidence.roots[0].path,evidence.roots[0].path);assert.equal(JSON.stringify(accepted).includes('password'),false);assert.equal(JSON.stringify(accepted).includes('extracted-token'),false);
+});
