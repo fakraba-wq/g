@@ -1,0 +1,119 @@
+import { randomBytes, randomInt, scryptSync, timingSafeEqual, randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { parseSignatures } from './scanner.js';
+
+export async function createBackend(directory, configuredPassword = '') {
+  if (configuredPassword && (configuredPassword.length < 12 || configuredPassword.length > 256)) throw new Error('SENTINEL_ADMIN_PASSWORD must contain 12–256 characters.');
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const stateFile = new URL('state.json', directory);
+  let state;
+  try { state = JSON.parse(await readFile(stateFile, 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; state = { auth: null, sessions: [] }; }
+  const tokens = new Map(), limits = new Map();
+  const secretHash = (password, salt) => scryptSync(password, salt, 64).toString('hex');
+  let saveQueue = Promise.resolve();
+  function save() {
+    const data = JSON.stringify(state);
+    saveQueue = saveQueue.catch(() => {}).then(async () => {
+      const temp = new URL('state.json.tmp', directory);
+      await writeFile(temp, data, { mode: 0o600 }); await rename(temp, stateFile);
+    });
+    return saveQueue;
+  }
+  const envAuth = configuredPassword ? { salt: 'sentinel-environment-password-v1', hash: secretHash(configuredPassword, 'sentinel-environment-password-v1') } : null;
+  function fail(status, message) { throw Object.assign(new Error(message), { status }); }
+  function limited(key, maximum) {
+    const now = Date.now(), existing = limits.get(key);
+    const value = existing && existing.until > now ? existing : { count: 0, until: now + 60000 };
+    value.count++; limits.set(key, value);
+    if (limits.size > 10000) for (const [key, entry] of limits) if (entry.until < now) limits.delete(key);
+    if (value.count > maximum) fail(429, 'Too many requests. Try again in a minute.');
+  }
+  const publicSession = session => ({ id: session.id, code: session.code, createdAt: session.createdAt, expiresAt: session.expiresAt, signatureCount: session.signatures.length, redeemed: !!session.redeemed, report: session.report || null });
+  return async function api(req, res, pathname) {
+    if (!pathname.startsWith('/api/')) return false;
+    const reply = (code, value) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
+    try {
+      const ip = req.socket.remoteAddress;
+      limited('all:' + ip, 180);
+      if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) fail(403, 'Cross-origin requests are not allowed.');
+      let body = {};
+      if (req.method === 'POST') {
+        if (!req.headers['content-type']?.startsWith('application/json')) fail(415, 'JSON content type required.');
+        const chunks = []; let size = 0;
+        for await (const chunk of req) { size += chunk.length; if (size > 2 * 1024 * 1024) fail(413, 'Request exceeds 2 MB.'); chunks.push(chunk); }
+        try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { fail(400, 'Invalid JSON.'); }
+        if (!body || Array.isArray(body) || typeof body !== 'object') fail(400, 'Expected a JSON object.');
+      }
+      if (pathname === '/api/auth/status' && req.method === 'GET') { reply(200, { setupRequired: !envAuth && !state.auth }); return true; }
+      if ((pathname === '/api/auth/setup' || pathname === '/api/auth/login') && req.method === 'POST') {
+        limited('login:' + ip, 8);
+        if (typeof body.password !== 'string' || body.password.length < 12 || body.password.length > 256) fail(400, 'Use a password between 12 and 256 characters.');
+        let auth = envAuth || state.auth;
+        if (pathname.endsWith('/setup')) {
+          if (auth) fail(409, 'Staff password already configured. Sign in instead.');
+          if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)) fail(403, 'Initial staff setup must run from localhost. Set SENTINEL_ADMIN_PASSWORD on the server for remote deployment.');
+          const salt = randomBytes(24).toString('hex');
+          auth = { salt, hash: secretHash(body.password, salt) }; state.auth = auth; await save();
+        }
+        if (!auth || !timingSafeEqual(Buffer.from(auth.hash, 'hex'), Buffer.from(secretHash(body.password, auth.salt), 'hex'))) fail(401, 'Incorrect password.');
+        const token = randomBytes(32).toString('hex');
+        for (const [key, entry] of tokens) if (entry < Date.now()) tokens.delete(key);
+        tokens.set(token, Date.now() + 6 * 60 * 60 * 1000); reply(200, { token }); return true;
+      }
+      if (pathname === '/api/sessions/redeem' && req.method === 'POST') {
+        limited('redeem:' + ip, 6);
+        if (typeof body.code !== 'string' || !/^\d{6}$/.test(body.code)) fail(400, 'Enter the six-digit session code.');
+        const session = state.sessions.find(s => s.code === body.code && s.expiresAt > Date.now() && !s.redeemed);
+        if (!session) fail(404, 'Session unavailable, expired, or already redeemed.');
+        session.redeemed = true; session.uploadToken = randomBytes(32).toString('hex'); await save();
+        reply(200, { sessionId: session.id, uploadToken: session.uploadToken, expiresAt: session.expiresAt, signatures: session.signatures }); return true;
+      }
+      const reportRoute = pathname.match(/^\/api\/sessions\/([a-f0-9-]{36})\/report$/);
+      if (reportRoute && req.method === 'POST') {
+        const session = state.sessions.find(s => s.id === reportRoute[1]);
+        const token = req.headers.authorization?.replace(/^Bearer /, '');
+        if (!session?.uploadToken || !token || !/^[a-f0-9]{64}$/.test(token) || !timingSafeEqual(Buffer.from(token), Buffer.from(session.uploadToken))) fail(401, 'Invalid report token.');
+        if (session.expiresAt <= Date.now()) fail(410, 'Session expired.');
+        if (session.report) fail(409, 'A report has already been submitted.');
+        if (!Array.isArray(body.results) || !body.results.length || body.results.length > 1000) fail(400, 'Report must contain between 1 and 1,000 file results.');
+        const library = parseSignatures(session.signatures);
+        const results = body.results.map(file => {
+          if (!file || typeof file.name !== 'string' || !file.name || file.name.length > 500 || !Number.isSafeInteger(file.size) || file.size < 0) fail(400, 'Invalid file result.');
+          const name = file.name.split(/[\\/]/).pop();
+          const origin = file.origin === 'running-process' && body.processScanRequested === true ? 'running-process' : 'selected-folder';
+          const processId = origin === 'running-process' && Number.isInteger(file.processId) && file.processId > 0 && file.processId <= 4294967295 ? file.processId : undefined;
+          if (file.sha256 !== undefined && file.sha256 !== null) {
+            if (typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(file.sha256) || file.size > 200 * 1024 * 1024) fail(400, 'Invalid file hash or size.');
+            const sha256 = file.sha256.toLowerCase(), signature = library.get(sha256) || null;
+            return { name, size: file.size, sha256, signature, origin, processId, status: signature ? 'match' : library.size ? 'unmatched' : 'unverified' };
+          }
+          return { name, size: file.size, origin, processId, status: 'skipped', reason: 'Client could not hash this file.' };
+        });
+        session.report = { tool: 'Sentinel Windows scanner', version: 1, completedAt: new Date().toISOString(), scope: 'Selected-folder file hashes and, if explicitly opted in, readable running executable file hashes. No process memory, registry or deleted-file inspection.', interpretation: 'Self-reported client evidence. No client attestation. A match is not proof of cheating; no match is not proof of a cheat-free PC.', coverageLimited: body.coverageLimited !== false, processScanRequested: body.processScanRequested === true, processScanLimited: body.processScanRequested === true && body.processScanLimited !== false, signaturesUsed: session.signatures, results };
+        await save(); reply(201, { accepted: true }); return true;
+      }
+      const adminToken = req.headers.authorization?.replace(/^Bearer /, '');
+      if (!adminToken || (tokens.get(adminToken) || 0) <= Date.now()) fail(401, 'Staff sign-in required.');
+      if (pathname === '/api/auth/logout' && req.method === 'POST') { tokens.delete(adminToken); reply(200, { signedOut: true }); return true; }
+      if (pathname === '/api/sessions' && req.method === 'GET') { reply(200, { sessions: state.sessions.slice().reverse().map(publicSession) }); return true; }
+      if (pathname === '/api/sessions' && req.method === 'POST') {
+        state.sessions = state.sessions.filter(s => s.createdAt > Date.now() - 24 * 60 * 60 * 1000);
+        if (state.sessions.length >= 100) fail(429, 'Session limit reached. Sessions are retained for 24 hours.');
+        let library;
+        try { library = parseSignatures(body.signatures || []); } catch (error) { fail(400, error.message); }
+        if (library.size > 5000) fail(400, 'Remote sessions support at most 5,000 signatures.');
+        let code; do { code = String(randomInt(100000, 1000000)); } while (state.sessions.some(s => s.code === code));
+        const session = { id: randomUUID(), code, createdAt: Date.now(), expiresAt: Date.now() + 30 * 60 * 1000, redeemed: false, signatures: Array.from(library, ([sha256, entry]) => ({ sha256, ...entry })) };
+        state.sessions.push(session); await save(); reply(201, publicSession(session)); return true;
+      }
+      const sessionRoute = pathname.match(/^\/api\/sessions\/([a-f0-9-]{36})$/);
+      if (sessionRoute && req.method === 'GET') {
+        const session = state.sessions.find(s => s.id === sessionRoute[1]);
+        if (!session) fail(404, 'Session not found.'); reply(200, publicSession(session)); return true;
+      }
+      fail(404, 'Unknown API endpoint.');
+    } catch (error) { reply(error.status || 500, { error: error.status ? error.message : 'Internal server error.' }); }
+    return true;
+  };
+}
