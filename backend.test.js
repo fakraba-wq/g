@@ -36,13 +36,21 @@ test('authenticated staff-to-scanner workflow and report boundaries', async t =>
   await t.test('creates one-time session with signature snapshot', async () => {
     const response = await request('sessions', { signatures: [{ sha256: digest, name: 'Harmless test fixture' }] }, token);
     assert.equal(response.status, 201); session = response.data;
-    assert.match(session.code, /^\d{6}$/);
+    assert.match(session.code, /^[A-HJ-NP-Z2-9]{8}$/);
+    assert.match(session.invitePath, /^\/check\/[a-f0-9]{64}$/);
+    assert.equal(session.sharingEnabled, false);
+    assert.equal(session.inviteUrl, null);
     assert.equal((await request('sessions', { signatures: [{ sha256: 'broken', name: 'bad' }] }, token)).status, 400);
   });
   await t.test('redeems a code only once and rejects invalid report tokens', async () => {
+    const invite = await request('invites/' + session.invitePath.split('/').pop());
+    assert.equal(invite.status, 200); assert.equal(invite.data.state, 'pending');
+    assert.equal(invite.data.localOnly, true); assert.equal(invite.data.code, undefined); assert.equal(invite.data.report, undefined);
+    assert.equal((await request('invites/' + '0'.repeat(64))).status, 404);
     const response = await request('sessions/redeem', { code: session.code });
     assert.equal(response.status, 200); agent = response.data;
     assert.equal((await request('sessions/redeem', { code: session.code })).status, 404);
+    assert.equal((await request('invites/' + session.invitePath.split('/').pop())).data.state, 'in-progress');
     assert.equal((await request(`sessions/${session.id}/report`, { results: [] }, 'bad-token')).status, 401);
   });
   await t.test('rejects malformed evidence', async () => {
@@ -57,8 +65,10 @@ test('authenticated staff-to-scanner workflow and report boundaries', async t =>
     assert.equal(stored.data.report.results[0].processId, 1234);
     assert.equal(stored.data.report.processScanLimited, true);
     assert.equal((await request(`sessions/${session.id}/report`, { results: [] }, agent.uploadToken)).status, 409);
+    assert.equal((await request('invites/' + session.invitePath.split('/').pop())).data.state, 'received');
   });
   await t.test('saves a versioned library and re-analyzes without changing original evidence', async () => {
+    assert.equal((await request('sessions', { durationHours: 9999 }, token)).status, 400);
     assert.equal((await request(`sessions/${session.id}/analyze`, {}, token)).status, 409);
     const saved = await request('library', { baseRevision: 0, signatures: [{ sha256: digest, name: 'Harmless test fixture', source: 'Known hello test vector', category: 'test' }] }, token);
     assert.equal(saved.status, 200); assert.equal(saved.data.revision, 1);
@@ -73,6 +83,15 @@ test('authenticated staff-to-scanner workflow and report boundaries', async t =>
     const created = await request('sessions', {}, token); assert.equal(created.data.signatureCount, 1); assert.equal(created.data.libraryRevision, 1);
     const persisted = JSON.parse(await readFile(join(dir, 'state.json'), 'utf8')); assert.equal(persisted.library.entries[0].category, 'test');
     await createBackend(pathToFileURL(dir + sep));
+  });
+  await t.test('accepts authorized evidence-only scans while excluding account and command contents', async () => {
+    const created = await request('sessions', {}, token);
+    const redeemed = await request('sessions/redeem', { code: created.data.code });
+    const response = await request(`sessions/${created.data.id}/report`, { results: [], options: { boot: true, activity: true }, evidence: { boot: { windowsVersion: 'Fixture OS', biosVendor: 'Fixture vendor', serialNumber: 'must-not-store' }, executions: [{ name: 'C:\\private\\sample.exe', timeUTC: '2026-01-01T10:00:00Z', source: 'Security', eventId: 4688, pathState: 'not-found', commandLine: 'must-not-store' }] } }, redeemed.data.uploadToken);
+    assert.equal(response.status, 201);
+    const stored = (await request(`sessions/${created.data.id}`, undefined, token)).data.report;
+    assert.equal(stored.version, 3); assert.equal(stored.evidence.executions[0].name, 'sample.exe');
+    assert.equal(JSON.stringify(stored).includes('must-not-store'), false);
   });
   await t.test('sign-out revokes the staff token', async () => {
     assert.equal((await request('auth/logout', {}, token)).status, 200);

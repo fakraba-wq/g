@@ -1,4 +1,4 @@
-CRIMSON PC CHECK V2 - UPDATE FROM SENTINEL
+CRIMSON PC CHECK V3 - UPDATE FROM CRIMSON V2 / SENTINEL
 
 1. Stop your OLD server window with Ctrl+C.
 2. Extract this ZIP into a new folder.
@@ -15,3 +15,8 @@ For a fresh installation, use QUICKSTART.txt.
 Old start-sentinel.cmd remains a compatibility shortcut.
 Use the new crimson-pc-check-windows-amd64.exe or the Guided scanner button,
 not an old copy of sentinel-scanner-windows-amd64.exe.
+
+V3 adds optional Windows evidence panels and private player invitations with QR.
+Public player links need a real HTTPS domain and deployed server; see HOSTING.md.
+Keep your current .sentinel folder. Old six-digit codes remain supported.
+Download a new scanner to use the optional V3 sources.

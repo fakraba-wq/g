@@ -24,23 +24,27 @@ const maxSize int64 = 200 * 1024 * 1024
 const maxFiles = 1000
 
 type entry struct {
-	Name      string `json:"name"`
-	Size      int64  `json:"size"`
-	SHA256    string `json:"sha256,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Origin    string `json:"origin"`
-	ProcessID uint32 `json:"processId,omitempty"`
+	Name            string  `json:"name"`
+	Size            int64   `json:"size"`
+	SHA256          string  `json:"sha256,omitempty"`
+	Reason          string  `json:"reason,omitempty"`
+	Origin          string  `json:"origin"`
+	ProcessID       uint32  `json:"processId,omitempty"`
+	PE              *peInfo `json:"pe,omitempty"`
+	IntegrityStatus string  `json:"integrityStatus,omitempty"`
 }
 type processFile struct {
 	Path string
 	PID  uint32
 }
 type scanReport struct {
-	Results              []entry  `json:"results"`
-	CoverageLimited      bool     `json:"coverageLimited"`
-	ProcessScanRequested bool     `json:"processScanRequested"`
-	ProcessScanLimited   bool     `json:"processScanLimited"`
-	CoverageNotes        []string `json:"coverageNotes,omitempty"`
+	Results              []entry     `json:"results"`
+	CoverageLimited      bool        `json:"coverageLimited"`
+	ProcessScanRequested bool        `json:"processScanRequested"`
+	ProcessScanLimited   bool        `json:"processScanLimited"`
+	CoverageNotes        []string    `json:"coverageNotes,omitempty"`
+	Options              scanOptions `json:"options,omitempty"`
+	Evidence             evidence    `json:"evidence,omitempty"`
 }
 type session struct {
 	SessionID   string `json:"sessionId"`
@@ -63,7 +67,14 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 func inspectContext(ctx context.Context, path, origin string, pid uint32) entry {
+	return inspectEnriched(ctx, path, origin, pid, false)
+}
+func inspectEnriched(ctx context.Context, path, origin string, pid uint32, integrity bool) entry {
 	result := entry{Name: filepath.Base(path), Origin: origin, ProcessID: pid}
+	if !localInputPath(path) {
+		result.Reason = "Network or unavailable volume not inspected"
+		return result
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		result.Reason = "Unable to open file"
@@ -92,6 +103,19 @@ func inspectContext(ctx context.Context, path, origin string, pid uint32) entry 
 		return result
 	}
 	result.SHA256 = hex.EncodeToString(hash.Sum(nil))
+	if integrity {
+		result.PE = readPE(f)
+		if result.PE != nil {
+			result.IntegrityStatus = trustForFile(path)
+		}
+		latest, err := os.Stat(path)
+		if err != nil || !os.SameFile(before, latest) || latest.Size() != before.Size() || !latest.ModTime().Equal(before.ModTime()) {
+			result.SHA256 = ""
+			result.PE = nil
+			result.IntegrityStatus = ""
+			result.Reason = "File changed during check"
+		}
+	}
 	return result
 }
 
@@ -199,11 +223,12 @@ func runCLI(serverInput, codeInput string) error {
 	}
 	code := codeInput
 	if code == "" {
-		code = ask("Six-digit session code")
+		code = ask("Session PIN")
 	}
-	if len(code) != 6 || strings.Trim(code, "0123456789") != "" {
+	if !validCode(strings.ToUpper(code)) {
 		return errors.New("invalid session code")
 	}
+	code = strings.ToUpper(code)
 	folder := strings.Trim(ask("Folder path to inspect (leave blank for processes only)"), "\"")
 	processConsent := strings.EqualFold(ask("Also hash accessible running executable files? Type PROCESSES to opt in"), "PROCESSES")
 	if folder == "" && !processConsent {

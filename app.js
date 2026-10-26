@@ -1,4 +1,6 @@
 import { inspectFile, parseSignatures, hashBytes } from './scanner.js';
+import { renderEvidence } from './report-view.js';
+import { openInvite, refreshInvite, setupInvites } from './invite-view.js';
 
 const $ = id => document.getElementById(id);
 let files = [], signatures = new Map(), results = [], busy = false, report = null;
@@ -25,6 +27,7 @@ function download(name, content) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function renderResults() {
+  renderEvidence(report, $('result-search').value.trim());
   const labels = { match: 'Signature match · review', unmatched: 'No exact match', unverified: 'Unverified · no library', skipped: 'Skipped', error: 'Read failed', allowed: 'Staff allowlisted', test: 'Harmless test match' };
   $('result-rows').replaceChildren();
   const query = $('result-search').value.trim().toLowerCase(), filter = $('result-filter').value;
@@ -33,7 +36,7 @@ function renderResults() {
   for (const result of visible) {
     const tr = document.createElement('tr');
     const name = document.createElement('td'); name.textContent = result.name;
-    if (result.origin) { const origin = document.createElement('small'); origin.textContent = result.origin === 'running-process' ? `Running executable${result.processId ? ' · PID ' + result.processId : ''}` : 'Selected folder'; name.append(origin); }
+    if (result.origin) { const origin = document.createElement('small'); origin.textContent = result.origin === 'loaded-module' ? `FiveM DLL · PID ${result.processId || 'unavailable'}` : result.origin === 'running-process' ? `Running executable${result.processId ? ' · PID ' + result.processId : ''}` : 'Selected folder'; name.append(origin); }
     const size = document.createElement('td'); size.textContent = formatSize(result.size);
     const details = document.createElement('td');
     const hash = document.createElement('code'); hash.textContent = result.sha256 || result.reason; details.append(hash);
@@ -122,17 +125,19 @@ async function loadSessions() {
   $('session-list').replaceChildren();
   if (!sessions.length) { $('session-list').textContent = 'No sessions yet. Create a code to start a Windows check.'; return; }
   for (const session of sessions) {
+    refreshInvite(session);
     const row = document.createElement('div'); row.className = 'session-row';
     const code = document.createElement('strong'); code.className = 'session-code'; code.textContent = session.code;
     const info = document.createElement('div');
     const title = document.createElement('span'); title.textContent = session.report ? 'Report received' : Date.now() > session.expiresAt ? 'Expired' : session.redeemed ? 'Scanner connected · awaiting report' : 'Waiting for player';
     const detail = document.createElement('small'); detail.textContent = `${session.signatureCount ? session.signatureCount + ' signatures' : 'Inventory only · no signatures'} · Expires ${new Date(session.expiresAt).toLocaleTimeString()}`;
     info.append(title, detail); row.append(code, info);
+    const invite = document.createElement('button'); invite.className = 'secondary'; invite.textContent = 'Invitation'; invite.addEventListener('click', () => openInvite(session, { download: downloadSessionScanner, read: id => api('sessions/' + id) })); row.append(invite);
     if (!session.redeemed && !session.report && Date.now() < session.expiresAt) {
       const scanner = document.createElement('button'); scanner.className = 'secondary'; scanner.textContent = 'Guided scanner';
       scanner.addEventListener('click', () => downloadSessionScanner(session, scanner)); row.append(scanner);
       const copy = document.createElement('button'); copy.className = 'text-button'; copy.textContent = 'Copy code';
-      copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(session.code); $('session-status').textContent = 'Session code copied.'; } catch { $('session-status').textContent = 'Select the six-digit code and copy it manually.'; } }); row.append(copy);
+      copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(session.code); $('session-status').textContent = 'Session code copied.'; } catch { $('session-status').textContent = 'Select the PIN and copy it manually.'; } }); row.append(copy);
     }
     if (session.report) {
       const view = document.createElement('button'); view.className = 'secondary'; view.textContent = 'View report';
@@ -160,8 +165,8 @@ $('staff-logout').addEventListener('click', async () => { try { await api('auth/
 $('create-session').addEventListener('click', async () => {
   if (sessionsBusy) return; sessionsBusy = true; $('create-session').disabled = true;
   try {
-    const session = await api('sessions', libraryDirty ? { signatures: Array.from(signatures, ([sha256, entry]) => ({ sha256, ...entry })) } : {});
-    await loadSessions(); $('session-status').textContent = `Session ${session.code} created. Share this code privately with the player. ${signatures.size ? 'Signatures attached.' : 'No library attached: files will be unverified.'}`;
+    const session = await api('sessions', { durationHours: Number($('session-duration').value), ...(libraryDirty ? { signatures: Array.from(signatures, ([sha256, entry]) => ({ sha256, ...entry })) } : {}) });
+    await loadSessions(); openInvite(session, { download: downloadSessionScanner, read: id => api('sessions/' + id) }); $('session-status').textContent = `Session ${session.code} created. Share this code privately with the player. ${signatures.size ? 'Signatures attached.' : 'No library attached: files will be unverified.'}`;
   } catch (error) { $('session-status').textContent = error.message; }
   finally { sessionsBusy = false; $('create-session').disabled = false; }
 });
@@ -225,7 +230,7 @@ async function downloadSessionScanner(session, button) {
     if (!binaryResponse.ok || !checksumResponse.ok) throw new Error('Scanner build is unavailable. Use the EXE included in the project ZIP.');
     const binary = await binaryResponse.arrayBuffer(), checksum = (await checksumResponse.text()).trim().split(/\s/)[0];
     if (!/^[a-f0-9]{64}$/.test(checksum) || await hashBytes(binary) !== checksum) throw new Error('Scanner checksum mismatch. Download stopped.');
-    const config = new TextEncoder().encode(JSON.stringify({ server: location.origin, code: session.code }));
+    const config = new TextEncoder().encode(JSON.stringify({ server: session.inviteUrl ? new URL(session.inviteUrl).origin : location.origin, code: session.code }));
     const footer = new Uint8Array(12); new DataView(footer.buffer).setUint32(0, config.length, true); footer.set(new TextEncoder().encode('CRMSNCFG'), 4);
     const url = URL.createObjectURL(new Blob([binary, config, footer], { type: 'application/octet-stream' }));
     const link = document.createElement('a'); link.href = url; link.download = `crimson-session-${session.code}.exe`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
@@ -235,3 +240,5 @@ async function downloadSessionScanner(session, button) {
 setInterval(() => { if (staffToken && !document.hidden && !sessionsBusy) loadSessions().catch(error => { $('session-status').textContent = error.message; }); }, 10000);
 
 document.addEventListener('visibilitychange', () => { if (staffToken && !document.hidden && !sessionsBusy) loadSessions().catch(error => { $('session-status').textContent = error.message; }); });
+
+setupInvites();

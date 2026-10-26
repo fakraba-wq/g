@@ -6,6 +6,7 @@ import net from 'node:net';
 import {fileURLToPath} from 'node:url';
 import {existsSync} from 'node:fs';
 import assert from 'node:assert/strict';
+import jsQR from 'jsqr';
 async function freePort(){const listener=net.createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));const port=listener.address().port;await new Promise(r=>listener.close(r));return port;}
 const root=fileURLToPath(new URL('../',import.meta.url)), children=[];
 const artifacts=join(root,'.test-artifacts');await mkdir(artifacts,{recursive:true});
@@ -18,7 +19,7 @@ assert.equal(built.status,0,'native test scanner build failed');
 const port=await freePort(),debugPort=await freePort(),siteURL='http://127.0.0.1:'+port,debug='http://127.0.0.1:'+debugPort;
 async function ready(url){for(let i=0;i<200;i++){try{const r=await fetch(url);if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,50));}throw new Error('Test service did not become ready');}
 try {
-const server=spawn(process.execPath,['server.js'],{cwd:root,env:{...process.env,PORT:String(port),SENTINEL_DATA_DIR:join(work,'data')},stdio:'ignore'});children.push(server);
+const server=spawn(process.execPath,['server.js'],{cwd:root,env:{...process.env,PORT:String(port),PUBLIC_URL:'https://check.example.test',SENTINEL_ADMIN_PASSWORD:'',SENTINEL_DATA_DIR:join(work,'data')},stdio:'ignore'});children.push(server);
 await ready(siteURL+'/api/auth/status');
 const chrome=spawn(process.env.CHROMIUM_BIN||'chromium',['--headless','--no-sandbox','--disable-gpu','--disable-dev-shm-usage','--user-data-dir='+join(work,'chrome'),'--remote-debugging-port='+debugPort,'--remote-debugging-address=127.0.0.1','about:blank'],{stdio:'ignore'});children.push(chrome);
 await ready(debug+'/json');
@@ -39,13 +40,23 @@ await site.evaluate("document.getElementById('staff-password').value=Array.from(
 await site.wait("!document.getElementById('session-controls').hidden && document.getElementById('session-status').textContent.includes('Staff signed in')");
 assert.match(await site.evaluate("document.getElementById('create-session').textContent"),/inventory/);
 await site.evaluate("document.getElementById('create-session').click()");await site.wait("document.querySelector('.session-code')!==null");
+await site.wait("!document.getElementById('invite-qr').hidden && document.getElementById('invite-qr').getContext('2d').getImageData(0,0,1,1).data[3]===255");
+const qrPixels=await site.evaluate("(()=>{const canvas=document.getElementById('invite-qr');return {width:canvas.width,height:canvas.height,pixels:Array.from(canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data),url:document.getElementById('invite-url').value};})()");
+const decodedQR=jsQR(new Uint8ClampedArray(qrPixels.pixels),qrPixels.width,qrPixels.height);assert.equal(decodedQR?.data,qrPixels.url);
+assert.match(qrPixels.url,/^https:\/\/check\.example\.test\/check\/[a-f0-9]{64}$/);
+const invitePath=new URL(qrPixels.url).pathname;
+await writeFile(join(artifacts,'invitation.png'),Buffer.from((await site.call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false})).data,'base64'));
+const invited=await fetch(siteURL+invitePath+'/scanner.exe');assert.equal(invited.status,200);const invitedBinary=Buffer.from(await invited.arrayBuffer());
+const invitedConfigSize=invitedBinary.readUInt32LE(invitedBinary.length-12);const invitedConfig=JSON.parse(invitedBinary.subarray(invitedBinary.length-12-invitedConfigSize,invitedBinary.length-12));assert.equal(invitedConfig.server,'https://check.example.test');
+assert.equal((await fetch(siteURL+'/api/invites/'+invitePath.split('/').pop())).status,200);
+await site.evaluate("document.getElementById('invite-close').click()");
 const code=await site.evaluate("document.querySelector('.session-code').textContent");
 const folder=await mkdtemp(join(tmpdir(),'crimson-evidence-'));await writeFile(join(folder,'hello.txt'),'hello');
 const child=spawn(nativePath,['-server',siteURL,'-code',code,'-no-open'],{stdio:['pipe','pipe','pipe']});children.push(child);let output='';child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);
 let guiURL;for(let i=0;i<100;i++){guiURL=output.match(/http:\/\/127\.0\.0\.1:\d+\/\?token=[a-f0-9]+/)?.[0];if(guiURL)break;await new Promise(r=>setTimeout(r,50));}assert.ok(guiURL,'native guided server did not start');
 const guiTarget=await(await fetch(debug+'/json/new?about:blank',{method:'PUT'})).json();const gui=await connect(guiTarget);
 await gui.call('Emulation.setDeviceMetricsOverride',{width:1200,height:1000,deviceScaleFactor:1,mobile:false});await gui.call('Page.navigate',{url:guiURL});
-await gui.wait("document.getElementById('code')?.value.length===6");assert.equal(await gui.evaluate("document.getElementById('code').value"),code);
+await gui.wait("document.getElementById('code')?.value.length>=6");assert.equal(await gui.evaluate("document.getElementById('code').value"),code);
 assert.equal(await gui.evaluate("document.getElementById('consent').checked"),false);assert.equal(await gui.evaluate("document.getElementById('processes').checked"),false);
 await writeFile(join(artifacts,'guided-scanner.png'),Buffer.from((await gui.call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true})).data,'base64'));
 await gui.call('Emulation.setDeviceMetricsOverride',{width:393,height:852,deviceScaleFactor:1,mobile:true});assert.equal(await gui.evaluate('document.documentElement.scrollWidth<=innerWidth'),true);await gui.call('Emulation.setDeviceMetricsOverride',{width:1200,height:1000,deviceScaleFactor:1,mobile:false});
@@ -56,6 +67,11 @@ await gui.evaluate("document.getElementById('share-consent').click();document.ge
 await site.call('Page.bringToFront');await site.wait("document.querySelector('.session-row')?.textContent.includes('Report received')");
 await site.evaluate("Array.from(document.querySelectorAll('.session-row button')).find(b=>b.textContent==='View report').click()");
 assert.match(await site.evaluate("document.getElementById('report-summary').textContent"),/No signature library/);
+assert.match(await site.evaluate("document.getElementById('evidence-workbench').textContent"),/NOT ASSESSED/);
+await site.evaluate("Array.from(document.querySelectorAll('.evidence-rail button')).find(b=>b.textContent.startsWith('External records')).click()");
+assert.match(await site.evaluate("document.querySelector('.evidence-panel-body').textContent"),/No external provider connected/);
+assert.equal((await fetch(siteURL+invitePath+'/scanner.exe')).status,410);
+
 await site.evaluate("document.querySelector('.signature-editor').open=true;document.getElementById('signature-name').value='Harmless browser test';document.getElementById('signature-hash').value='2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';document.getElementById('signature-source').value='Known hello test vector';document.getElementById('signature-category').value='test';document.getElementById('signature-form').requestSubmit();document.getElementById('save-library').click()");
 await site.wait("document.getElementById('signature-status').textContent.includes('Library saved')");
 await site.evaluate("document.getElementById('reanalyze-report').click()");await site.wait("document.getElementById('report-summary').textContent.includes('Re-analyzed')");
@@ -66,14 +82,27 @@ await site.evaluate("document.getElementById('reanalyze-report').click()");await
 await site.evaluate("document.getElementById('result-search').value='does-not-exist';document.getElementById('result-search').dispatchEvent(new Event('input'));");assert.match(await site.evaluate("document.getElementById('result-rows').textContent"),/No files match/);
 await site.evaluate("document.getElementById('result-search').value='';document.getElementById('result-search').dispatchEvent(new Event('input'));document.getElementById('result-filter').value='test';document.getElementById('result-filter').dispatchEvent(new Event('change'));");assert.match(await site.evaluate("document.getElementById('result-count').textContent"),/1 \/ 1/);
 const downloads=join(work,'downloads');await mkdir(downloads,{recursive:true});await site.call('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloads});
-await site.evaluate("document.getElementById('export-report').click()");await site.evaluate("document.getElementById('create-session').click()");await site.wait("document.querySelectorAll('.session-row').length===2");
+await site.evaluate("document.getElementById('export-report').click()");await site.evaluate("document.getElementById('create-session').click()");await site.wait("document.querySelectorAll('.session-row').length===2");await site.evaluate("document.getElementById('invite-close').click()");
 await site.evaluate("Array.from(document.querySelectorAll('.session-row button')).find(b=>b.textContent==='Guided scanner').click()");
 await site.wait("document.getElementById('session-status').textContent.includes('Guided scanner downloaded')");
 let names;for(let i=0;i<100;i++){names=await readdir(downloads);if(names.some(n=>n.endsWith('.exe'))&&names.some(n=>n.endsWith('.json')))break;await new Promise(r=>setTimeout(r,50));}
-const personalized=await readFile(join(downloads,names.find(n=>n.endsWith('.exe'))));assert.equal(personalized.subarray(-8).toString(),'CRMSNCFG');const length=personalized.readUInt32LE(personalized.length-12);const config=JSON.parse(personalized.subarray(personalized.length-12-length,personalized.length-12));assert.equal(config.server,siteURL);assert.match(config.code,/^\d{6}$/);assert.equal(personalized.subarray(0,2).toString(),'MZ');
+const personalized=await readFile(join(downloads,names.find(n=>n.endsWith('.exe'))));assert.equal(personalized.subarray(-8).toString(),'CRMSNCFG');const length=personalized.readUInt32LE(personalized.length-12);const config=JSON.parse(personalized.subarray(personalized.length-12-length,personalized.length-12));assert.equal(config.server,'https://check.example.test');assert.match(config.code,/^[A-HJ-NP-Z2-9]{8}$/);assert.equal(personalized.subarray(0,2).toString(),'MZ');
 const report=JSON.parse(await readFile(join(downloads,names.find(n=>n.endsWith('.json'))),'utf8'));assert.equal(report.results[0].status,'test');
+await site.evaluate(`(async()=>{const headers={'Content-Type':'application/json',Authorization:'Bearer '+sessionStorage.getItem('sentinel-staff-token')};const created=await(await fetch('/api/sessions',{method:'POST',headers,body:'{}'})).json();const agent=await(await fetch('/api/sessions/redeem',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:created.code})})).json();await fetch('/api/sessions/'+created.id+'/report',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+agent.uploadToken},body:JSON.stringify({results:[{name:'synthetic-fixture.dll',size:256,sha256:'e'.repeat(64),origin:'loaded-module',processId:987,pe:{machine:'x64',timestamp:1000000000,isDLL:true},integrityStatus:'unsigned'}],coverageLimited:true,options:{modules:true,integrity:true,boot:true,activity:true},evidence:{boot:{windowsVersion:'Synthetic fixture OS',biosVendor:'Synthetic fixture vendor',biosVersion:'fixture',boardManufacturer:'Synthetic fixture maker',boardProduct:'Synthetic fixture board',lastBootUTC:'2026-01-01T08:00:00Z',fastBootEnabled:true},executions:[{name:'synthetic-fixture.exe',timeUTC:'2026-01-01T09:00:00Z',source:'Security',eventId:4688,pathState:'not-found'}],collection:[{key:'modules',state:'collected',count:1,note:'Synthetic test fixture'},{key:'integrity',state:'collected',count:1,note:'Synthetic test fixture'},{key:'boot',state:'collected',count:1,note:'Synthetic test fixture'},{key:'activity',state:'partial',count:1,note:'Synthetic test fixture'}]}})});document.getElementById('refresh-sessions').click();})()`);
+await site.wait("document.querySelectorAll('.session-row').length===3");
+await site.evaluate("document.querySelector('.session-row button').click()");
+await site.evaluate("Array.from(document.querySelectorAll('.session-row:first-child button')).find(b=>b.textContent==='View report').click()");
+await site.evaluate("document.getElementById('invite-dialog').close();document.getElementById('result-filter').value='all';document.getElementById('result-filter').dispatchEvent(new Event('change'));Array.from(document.querySelectorAll('.evidence-rail button')).find(b=>b.textContent.startsWith('Boot & system')).click()");
+assert.match(await site.evaluate("document.querySelector('.evidence-panel-body').textContent"),/Synthetic fixture board/);
+assert.match(await site.evaluate("document.querySelector('.evidence-panel-body').textContent"),/standard Windows feature/);
+await site.evaluate("Array.from(document.querySelectorAll('.evidence-rail button')).find(b=>b.textContent.startsWith('Execution timeline')).click()");
+assert.match(await site.evaluate("document.querySelector('.evidence-panel-body').textContent"),/does not prove deletion or intent/);
+await site.evaluate("Array.from(document.querySelectorAll('.evidence-rail button')).find(b=>b.textContent.startsWith('Integrity logs')).click()");
+assert.match(await site.evaluate("document.querySelector('.evidence-panel-body').textContent"),/No Windows signature found/);
+await writeFile(join(artifacts,'evidence-workbench.png'),Buffer.from((await site.call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false})).data,'base64'));
+await site.call('Emulation.setDeviceMetricsOverride',{width:393,height:852,deviceScaleFactor:1,mobile:true});assert.equal(await site.evaluate('document.documentElement.scrollWidth<=innerWidth'),true);await site.call('Emulation.setDeviceMetricsOverride',{width:1440,height:1100,deviceScaleFactor:1,mobile:false});
 await site.call('Page.reload');await site.wait("document.getElementById('library-caption')?.textContent.includes('Saved revision 1')");assert.match(await site.evaluate("document.getElementById('stat-signatures').textContent"),/^1/);
 await gui.evaluate("document.getElementById('quit').click()");await gui.wait("document.getElementById('message').textContent.includes('Scanner fermé')");if(child.exitCode===null)await new Promise(r=>child.once('close',r));
-assert.deepEqual(site.errors,[]);assert.deepEqual(gui.errors,[]);console.log('PASS: Crimson branding/logo, desktop/mobile layout, native guided wizard with explicit consent, real folder hash upload, automatic session refresh, persistent library, re-analysis retaining original evidence, search/filter, JSON export and personalized EXE footer. Zero browser runtime exceptions.');site.ws.close();gui.ws.close();
+assert.deepEqual(site.errors,[]);assert.deepEqual(gui.errors,[]);console.log('PASS: Crimson branding/logo, desktop/mobile layout, native guided wizard with explicit consent, real folder hash upload, automatic session refresh, persistent library, re-analysis retaining original evidence, search/filter, evidence panels, private invitation authorization, actual decoded QR, JSON export and personalized EXE footer. Zero browser runtime exceptions.');site.ws.close();gui.ws.close();
 
 } finally { for(const child of children.reverse()){if(child.exitCode===null&&child.signalCode===null)child.kill('SIGTERM');} }

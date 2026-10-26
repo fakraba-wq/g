@@ -136,6 +136,18 @@ func TestLaunchConfigFooter(t *testing.T) {
 		t.Fatal("malformed footer accepted")
 	}
 }
+func TestSessionPINFormats(t *testing.T) {
+	for _, code := range []string{"123456", "C3L8S8D2", "ABCDEFGH"} {
+		if !validCode(code) {
+			t.Errorf("valid PIN rejected: %s", code)
+		}
+	}
+	for _, code := range []string{"123456789012", "password", "ABCD0FGH", "ABCD1FGH", "abcdef12", ""} {
+		if validCode(code) {
+			t.Errorf("invalid PIN accepted: %s", code)
+		}
+	}
+}
 
 func TestGuidedSelectionCancellationAndLimits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

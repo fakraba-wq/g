@@ -22,9 +22,17 @@ export async function hashBytes(bytes) {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
+export function parsePE(bytes) {
+  const view = new DataView(bytes);
+  if (view.byteLength < 64 || view.getUint16(0, true) !== 0x5a4d) return undefined;
+  const offset = view.getUint32(60, true);
+  if (offset < 64 || offset > 1024 * 1024 || offset + 24 > view.byteLength || view.getUint32(offset, true) !== 0x4550) return undefined;
+  const machines = { 0x14c: 'x86', 0x8664: 'x64', 0xaa64: 'arm64' }, timestamp = view.getUint32(offset + 8, true);
+  return { machine: machines[view.getUint16(offset + 4, true)] || 'unknown', timestamp, isDLL: !!(view.getUint16(offset + 22, true) & 0x2000), ...(timestamp ? { linkerTimeUTC: new Date(timestamp * 1000).toISOString() } : {}) };
+}
 export async function inspectFile(file, signatures) {
   const base = { name: file.name, size: file.size };
   if (file.size > MAX_FILE_SIZE) return { ...base, status: 'skipped', reason: 'Over the 200 MB per-file limit' };
-  const sha256 = await hashBytes(await file.arrayBuffer());
-  return { ...base, ...classifyHash(sha256, signatures) };
+  const bytes = await file.arrayBuffer(), sha256 = await hashBytes(bytes);
+  return { ...base, ...classifyHash(sha256, signatures), pe: parsePE(bytes) };
 }

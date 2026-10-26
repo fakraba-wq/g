@@ -10,7 +10,11 @@ import (
 )
 
 func scanSelection(ctx context.Context, folder string, processes bool, progress func(int)) (scanReport, error) {
-	report := scanReport{Results: []entry{}, ProcessScanRequested: processes}
+	return scanWithOptions(ctx, folder, scanOptions{Processes: processes}, progress)
+}
+func scanWithOptions(ctx context.Context, folder string, options scanOptions, progress func(int)) (scanReport, error) {
+	processes := options.Processes
+	report := scanReport{Results: []entry{}, ProcessScanRequested: processes, Options: options}
 	add := func(result entry) {
 		report.Results = append(report.Results, result)
 		if result.SHA256 == "" {
@@ -21,6 +25,9 @@ func scanSelection(ctx context.Context, folder string, processes bool, progress 
 		}
 	}
 	if folder != "" {
+		if !localInputPath(folder) {
+			return report, errors.New("choisissez un dossier sur un volume local")
+		}
 		info, err := os.Lstat(folder)
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return report, errors.New("dossier introuvable ou inaccessible")
@@ -44,7 +51,7 @@ func scanSelection(ctx context.Context, folder string, processes bool, progress 
 			if d.IsDir() {
 				return nil
 			}
-			add(inspectContext(ctx, path, "selected-folder", 0))
+			add(inspectEnriched(ctx, path, "selected-folder", 0, options.Integrity))
 			return nil
 		})
 		if err != nil {
@@ -74,7 +81,7 @@ func scanSelection(ctx context.Context, folder string, processes bool, progress 
 				report.ProcessScanLimited = true
 				break
 			}
-			result := inspectContext(ctx, p.Path, "running-process", p.PID)
+			result := inspectEnriched(ctx, p.Path, "running-process", p.PID, options.Integrity)
 			if result.SHA256 == "" {
 				report.ProcessScanLimited = true
 			}
@@ -88,7 +95,70 @@ func scanSelection(ctx context.Context, folder string, processes bool, progress 
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
-	if len(report.Results) == 0 {
+	if options.Modules {
+		modules, limited, err := gameModules()
+		if err != nil {
+			limited = true
+		}
+		count := 0
+		seen := map[string]bool{}
+		for _, module := range modules {
+			if err := ctx.Err(); err != nil {
+				return report, err
+			}
+			key := strings.ToLower(module.Path)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if len(report.Results) >= maxFiles {
+				limited = true
+				break
+			}
+			item := inspectEnriched(ctx, module.Path, "loaded-module", module.PID, options.Integrity)
+			if item.SHA256 == "" {
+				limited = true
+			}
+			add(item)
+			count++
+		}
+		state := "collected"
+		if limited {
+			state = "partial"
+			report.CoverageLimited = true
+		}
+		if err != nil {
+			state = "unavailable"
+		}
+		report.Evidence.Collection = append(report.Evidence.Collection, collection{Key: "modules", State: state, Count: count, Note: "Accessible DLL image files listed for FiveM/GTA processes only; no process memory dump."})
+	} else {
+		report.Evidence.Collection = append(report.Evidence.Collection, collection{Key: "modules", State: "not-requested", Note: "Not authorized in this scan."})
+	}
+	system := systemEvidence(ctx, options.Boot, options.Activity)
+	report.Evidence.Boot = system.Boot
+	report.Evidence.Executions = system.Executions
+	report.Evidence.WindowStartUTC = system.WindowStartUTC
+	report.Evidence.Collection = append(report.Evidence.Collection, system.Collection...)
+	for _, status := range system.Collection {
+		if status.State == "partial" || status.State == "unavailable" {
+			report.CoverageLimited = true
+		}
+	}
+	count := 0
+	for _, file := range report.Results {
+		if file.PE != nil {
+			count++
+		}
+	}
+	state := "not-requested"
+	if options.Integrity {
+		state = "collected"
+	}
+	report.Evidence.Collection = append(report.Evidence.Collection, collection{Key: "integrity", State: state, Count: count, Note: "PE header timestamps and cache-only Windows trust checks; unsigned files are not automatically cheats."})
+	if err := ctx.Err(); err != nil {
+		return report, err
+	}
+	if len(report.Results) == 0 && !options.Boot && !options.Activity && !options.Modules {
 		return report, errors.New("aucun fichier accessible; choisissez un dossier ou activez les processus sur Windows")
 	}
 	return report, nil

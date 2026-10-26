@@ -1,4 +1,4 @@
-CRIMSON PC CHECK V2 - WINDOWS
+CRIMSON PC CHECK V3 - WINDOWS
 
 1. Install Node.js 22+ from https://nodejs.org if it is not installed.
 2. Extract the ZIP. Double-click start-crimson.cmd. Keep this window open.
@@ -6,7 +6,10 @@ CRIMSON PC CHECK V2 - WINDOWS
 4. Import trusted signature JSON, or use Add a signature with its evidence
    reference. Click Save library. It persists across server restarts.
    No library means inventory only, never a "clean PC" verdict.
-5. Create a session. Click Guided scanner on that session row.
+5. Create a session. The invitation dialog shows its PIN, expiry and status.
+   For local testing, click Guided scanner on the session row.
+   For a player on another PC, first configure HTTPS hosting (HOSTING.md),
+   then copy the private player link or QR from the invitation dialog.
 6. Open the downloaded EXE. A local browser wizard opens with server and code
    already filled in. No PROCESSES / YES / SEND terminal commands required.
 7. Choose a folder and/or opt in to running executable file hashing.
@@ -17,7 +20,7 @@ CRIMSON PC CHECK V2 - WINDOWS
    is retained; harmless test and allowed signatures are labeled separately.
 
 FALLBACK: the generic EXE is in dist/crimson-pc-check-windows-amd64.exe.
-It opens the same wizard; enter your 6-digit session code there.
+It opens the same wizard; enter your session PIN there (new eight-character or legacy six-digit).
 
 The native build is unsigned. Follow your Windows security policy. Do not
  disable antivirus or bypass platform warnings. The base EXE has a checksum
@@ -34,3 +37,9 @@ independent review. A match is not proof of cheating. This is not a full-PC
 or process-memory anti-cheat, and client reports are not attested.
 
 See UPDATE.txt to preserve your existing data when updating from Sentinel.
+
+OPTIONAL V3 SOURCES
+The scanner offers FiveM loaded DLL hashes, cached Windows signature trust,
+boot/system facts and existing execution event metadata. Every option is
+explicit. Unavailable logs/access are displayed as limited coverage.
+No external cheater databases are connected. No tool detects every cheat.

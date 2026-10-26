@@ -1,0 +1,25 @@
+services:
+  crimson:
+    build: .
+    environment:
+      SENTINEL_ADMIN_PASSWORD: ${CRIMSON_ADMIN_PASSWORD:?Set a private staff password in the VPS environment}
+      PUBLIC_URL: https://${PUBLIC_DOMAIN:?Set your actual DNS hostname}
+    volumes:
+      - crimson-data:/data/crimson
+    restart: unless-stopped
+  https:
+    image: caddy:2.10.2-alpine
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set your actual DNS hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+volumes:
+  crimson-data:
+  caddy-data:
+  caddy-config:

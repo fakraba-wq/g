@@ -15,6 +15,20 @@ type launchConfig struct {
 	Code   string `json:"code"`
 }
 
+func validCode(code string) bool {
+	if len(code) == 6 {
+		return strings.Trim(code, "0123456789") == ""
+	}
+	if len(code) != 8 {
+		return false
+	}
+	for _, character := range code {
+		if !strings.ContainsRune("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", character) {
+			return false
+		}
+	}
+	return true
+}
 func readLaunchConfig(path string) launchConfig {
 	f, err := os.Open(path)
 	if err != nil {
@@ -42,7 +56,7 @@ func readLaunchConfig(path string) launchConfig {
 		return launchConfig{}
 	}
 	server, err := validateServer(config.Server)
-	if err != nil || len(config.Code) != 6 || strings.Trim(config.Code, "0123456789") != "" {
+	if err != nil || !validCode(config.Code) {
 		return launchConfig{}
 	}
 	config.Server = server

@@ -91,6 +91,10 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Code      string `json:"code"`
 		Folder    string `json:"folder"`
 		Processes bool   `json:"processes"`
+		Modules   bool   `json:"modules"`
+		Integrity bool   `json:"integrity"`
+		Boot      bool   `json:"boot"`
+		Activity  bool   `json:"activity"`
 		Consent   bool   `json:"consent"`
 	}
 	if r.Method == "POST" {
@@ -157,19 +161,23 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(400, err.Error())
 			return
 		}
-		if len(body.Code) != 6 || strings.Trim(body.Code, "0123456789") != "" {
-			fail(400, "Entrez le code de session de 6 chiffres, pas votre mot de passe.")
+		if !validCode(strings.ToUpper(body.Code)) {
+			fail(400, "Entrez le PIN de votre invitation, pas votre mot de passe.")
 			return
 		}
 		if !body.Consent {
 			fail(400, "Confirmez votre autorisation avant de commencer.")
 			return
 		}
-		if body.Folder == "" && !body.Processes {
-			fail(400, "Choisissez un dossier ou cochez Processus en cours.")
+		if body.Folder == "" && !body.Processes && !body.Modules && !body.Boot && !body.Activity {
+			fail(400, "Choisissez au moins une source de données à vérifier.")
 			return
 		}
 		if body.Folder != "" {
+			if !localInputPath(body.Folder) {
+				fail(400, "Choisissez un dossier local, pas un partage réseau.")
+				return
+			}
 			info, err := os.Lstat(body.Folder)
 			if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 				fail(400, "Choisissez un dossier accessible, pas un lien.")
@@ -190,7 +198,7 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		app.currentServer = server
 		app.currentSession = session{}
 		app.mu.Unlock()
-		go app.scan(ctx, server, body.Code, body.Folder, body.Processes, jobID)
+		go app.scan(ctx, server, strings.ToUpper(body.Code), body.Folder, scanOptions{Processes: body.Processes, Modules: body.Modules, Integrity: body.Integrity, Boot: body.Boot, Activity: body.Activity}, jobID)
 		reply(202, map[string]bool{"started": true})
 	case r.Method == "POST" && r.URL.Path == "/api/cancel":
 		app.mu.Lock()
@@ -235,7 +243,7 @@ func (app *guidedApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}
 }
-func (app *guidedApp) scan(ctx context.Context, server, code, folder string, processes bool, jobID uint64) {
+func (app *guidedApp) scan(ctx context.Context, server, code, folder string, options scanOptions, jobID uint64) {
 	defer func() {
 		app.mu.Lock()
 		if app.jobID == jobID {
@@ -256,7 +264,7 @@ func (app *guidedApp) scan(ctx context.Context, server, code, folder string, pro
 	app.currentSession = current
 	app.mu.Unlock()
 	app.phase("scanning", "Lecture des fichiers autorisés. Aucun contenu de fichier n'est envoyé.")
-	report, err := scanSelection(ctx, folder, processes, func(count int) { app.mu.Lock(); app.state.Count = count; app.mu.Unlock() })
+	report, err := scanWithOptions(ctx, folder, options, func(count int) { app.mu.Lock(); app.state.Count = count; app.mu.Unlock() })
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			app.phase("error", "Vérification arrêtée. Aucun rapport envoyé. Créez une nouvelle session pour recommencer.")

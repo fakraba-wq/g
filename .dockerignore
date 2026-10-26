@@ -1,0 +1,9 @@
+.git
+.sentinel
+.env
+node_modules
+.test-artifacts
+dist/*.exe
+dist/sentinel-project.zip
+crimson-report*.json
+*.log

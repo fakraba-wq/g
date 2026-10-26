@@ -5,11 +5,11 @@ import zipfile
 
 root = Path(__file__).resolve().parent.parent
 names = ['package.json', '.gitignore', 'index.html', 'style.css', 'app.js', 'backend.js',
-         'backend.test.js', 'server.js', 'scanner.js', 'scanner.test.js', 'scanner.ps1',
+         'backend.test.js', 'runtime.test.js', 'invite-view.js', 'player.html', 'player.js', 'package-lock.json', 'Dockerfile', '.dockerignore', 'compose.yaml', 'Caddyfile', '.env.example', 'HOSTING.md', 'report-model.js', 'report-model.test.js', 'report-view.js', 'server.js', 'scanner.js', 'scanner.test.js', 'scanner.ps1',
          'start-crimson.cmd', 'start-sentinel.cmd', 'README.md', 'QUICKSTART.txt', 'UPDATE.txt',
          'dist/crimson-pc-check-windows-amd64.exe', 'dist/checksums.txt']
 files = [root / name for name in names]
-for directory in ['client', 'scripts', 'assets']:
+for directory in ['client', 'scripts', 'assets', 'vendor']:
     files.extend(p for p in (root / directory).rglob('*') if p.is_file() and '__pycache__' not in p.parts)
 binary = root / 'dist/crimson-pc-check-windows-amd64.exe'
 assert hashlib.sha256(binary.read_bytes()).hexdigest() == (root / 'dist/checksums.txt').read_text().split()[0]
